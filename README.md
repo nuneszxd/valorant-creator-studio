@@ -33,7 +33,7 @@ Cada etapa termina com uma validação no computador pessoal do autor antes da s
 
 | Etapa | Conteúdo | Situação |
 |---|---|---|
-| 0 | Esqueleto do repositório, arquitetura, segurança, avaliação das fontes de dados | em andamento |
+| 0 | Esqueleto do repositório, arquitetura, segurança, avaliação das fontes de dados | pronto para revisão |
 | 1 | Backend base: FastAPI, configuração, esquema SQLite, sistema de tarefas, testes | planejado |
 | 2 | Casca do dashboard (React + TypeScript), navegação, estados das tarefas | planejado |
 | 3 | Importação de arquivo local (ffprobe) e biblioteca | planejado |
@@ -48,6 +48,7 @@ Cada etapa termina com uma validação no computador pessoal do autor antes da s
 
 - [Arquitetura](docs/architecture.md)
 - [Segurança e privacidade](docs/security.md)
+- [Fontes de dados do radar e da importação de VODs](docs/data-sources.md)
 
 ## Instalação e uso
 
