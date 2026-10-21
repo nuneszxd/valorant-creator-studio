@@ -1,0 +1,100 @@
+# ---------------------------------------------------------------
+# Valorant Creator Studio - itens que NUNCA devem ser versionados
+# ---------------------------------------------------------------
+
+# --- Segredos e credenciais ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+client_secret*.json
+*credentials*
+*token*.json
+*cookies*
+*.session
+
+# --- Videos, audios e imagens geradas (VODs, gravacoes, cortes) ---
+# Fixtures de teste sao geradas em tempo de execucao pelos testes (FFmpeg/lavfi)
+# e nao sao versionadas. Em caso de duvida, nao publique: pergunte primeiro.
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.avi
+*.flv
+*.m4v
+*.mpg
+*.mpeg
+*.wmv
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+
+# --- Pastas de trabalho, saida e dados locais ---
+data/
+workspace/
+output/
+exports/
+tmp/
+temp/
+*.tmp
+*.part
+
+# --- Bancos de dados locais ---
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-journal
+
+# --- Logs ---
+*.log
+logs/
+
+# --- Modelos e caches de modelos (transcricao, etc.) ---
+models/
+.cache/
+*.bin
+*.pt
+*.onnx
+*.gguf
+*.safetensors
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+.vite/
+*.tsbuildinfo
+coverage/
+
+# --- Editores e sistema operacional ---
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Configuracao local de ferramentas ---
+.claude/settings.local.json
