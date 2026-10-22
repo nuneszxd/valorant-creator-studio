@@ -22,7 +22,9 @@ def parse_iso_duration(text: str | None) -> float | None:
     if not match or not any(match.groups()):
         return None
     days, hours, minutes, seconds = (int(g) if g else 0 for g in match.groups())
-    return float(days * 86400 + hours * 3600 + minutes * 60 + seconds)
+    total = days * 86400 + hours * 3600 + minutes * 60 + seconds
+    # "P0D" is what YouTube returns for live/upcoming videos: the duration is simply unknown.
+    return float(total) if total > 0 else None
 
 
 def extract_hashtags(*texts: str | None) -> list[str]:

@@ -147,15 +147,13 @@ def _fill(template: Template, facts: dict[str, str]) -> str | None:
     return text.format_map({k: v for k, v in facts.items() if v})
 
 
-def _pick(bank: list[Template], facts: dict[str, str], count: int, rotate: int) -> list[str]:
+def _pick(bank: list[Template], facts: dict[str, str], count: int) -> list[str]:
+    """First `count` templates whose facts are all known. Banks are ordered most specific first."""
     options: list[str] = []
     for template in bank:
         filled = _fill(template, facts)
         if filled and filled not in options:
             options.append(filled)
-    if options:
-        shift = rotate % len(options)
-        options = options[shift:] + options[:shift]
     return options[:count]
 
 
@@ -190,13 +188,13 @@ def generate_copy(data: CopyInput) -> dict[str, Any]:
     if missing:
         notes.append("Para textos mais específicos, preencha nos fatos do corte: " + ", ".join(missing) + ".")
 
-    hooks = _pick(HOOKS.get(data.moment_type, []), facts, 3, data.clip_id)
+    hooks = _pick(HOOKS.get(data.moment_type, []), facts, 3)
     if len(hooks) < 3:
-        for extra in _pick(GENERIC_HOOKS, facts, 3, data.clip_id):
+        for extra in _pick(GENERIC_HOOKS, facts, 3):
             if extra not in hooks and len(hooks) < 3:
                 hooks.append(extra)
 
-    titles = _pick(TITLES, facts, 3, data.clip_id)
+    titles = _pick(TITLES, facts, 3)
     titles = [t[:60] for t in titles]
 
     # Caption: only assembled from facts we have.

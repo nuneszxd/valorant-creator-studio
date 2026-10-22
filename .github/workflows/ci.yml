@@ -47,3 +47,37 @@ jobs:
         if: failure()
         shell: bash
         run: bash scripts/ci/annotate_log.sh pytest.log "pytest ${{ matrix.os }}"
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        id: install
+        run: npm install --no-audit --no-fund 2>&1 | tee ../npm-install.log
+      - name: Type check
+        id: tsc
+        run: npm run typecheck 2>&1 | tee ../tsc.log
+      - name: Unit tests
+        id: vitest
+        run: npm test 2>&1 | tee ../vitest.log
+      - name: Build
+        id: build
+        run: npm run build 2>&1 | tee ../build.log
+      - name: Annotate failures
+        if: failure()
+        working-directory: .
+        run: |
+          [ "${{ steps.install.outcome }}" = "failure" ] && bash scripts/ci/annotate_log.sh npm-install.log "npm install"
+          [ "${{ steps.tsc.outcome }}" = "failure" ] && bash scripts/ci/annotate_log.sh tsc.log "tsc"
+          [ "${{ steps.vitest.outcome }}" = "failure" ] && bash scripts/ci/annotate_log.sh vitest.log "vitest"
+          [ "${{ steps.build.outcome }}" = "failure" ] && bash scripts/ci/annotate_log.sh build.log "vite build"
+          exit 0
