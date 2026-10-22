@@ -211,7 +211,14 @@ export function AudioPanel({ d, patch }: { d: Draft; patch: PatchDraft }) {
 
 // ---------------------------------------------------------------------------- subtitles
 
-export function SubtitlesPanel(props: { clip: ClipDetail; d: Draft; patch: PatchDraft; setCues: (cues: Cue[]) => void; onReload: () => void }) {
+export function SubtitlesPanel(props: {
+  clip: ClipDetail;
+  d: Draft;
+  patch: PatchDraft;
+  setCues: (cues: Cue[]) => void;
+  ensureSaved: () => Promise<boolean>;
+  onReload: () => void;
+}) {
   const { clip, d, patch } = props;
   const { run, busy } = useAction();
   const [allowDownload, setAllowDownload] = useState(false);
@@ -219,11 +226,14 @@ export function SubtitlesPanel(props: { clip: ClipDetail; d: Draft; patch: Patch
   const setStyle = (partial: Partial<SubtitleStyle>) => patch({ style: { ...style, ...partial } });
   const duration = d.end - d.start;
 
+  // Both actions work on the cut range saved on the server, so save pending edits first.
   async function fromTranscript() {
+    if (!(await props.ensureSaved())) return;
     const updated = await run(() => api.post<ClipDetail>(`/api/clips/${clip.id}/subtitles/from-transcript`), "Legendas preenchidas a partir da transcrição.");
     if (updated) props.setCues(updated.subtitles ?? []);
   }
   async function transcribe() {
+    if (!(await props.ensureSaved())) return;
     await run(() => api.post(`/api/clips/${clip.id}/transcribe`, { allow_model_download: allowDownload }), "Transcrição na fila.");
     props.onReload();
   }
@@ -368,12 +378,20 @@ export function ExportPanel({ d, patch, caps }: { d: Draft; patch: PatchDraft; c
 
 // ---------------------------------------------------------------------------- copy
 
-export function CopyPanel({ clip, onChanged }: { clip: ClipDetail; onChanged: () => void }) {
+export function CopyPanel(props: {
+  clip: ClipDetail;
+  pack: CopyPack | null;
+  setPack: (pack: CopyPack | null) => void;
+  ensureSaved: () => Promise<boolean>;
+  onChanged: () => void;
+}) {
+  const { clip, pack, setPack, onChanged } = props;
   const { run, busy } = useAction();
   const toast = useToast();
-  const [pack, setPack] = useState<CopyPack | null>(clip.copy_pack);
 
   async function generate() {
+    // The suggestions use the facts, map and agent stored on the server: save pending edits first.
+    if (!(await props.ensureSaved())) return;
     const result = await run(() => api.post<{ copy: CopyPack }>(`/api/clips/${clip.id}/copy/generate`), "Sugestões geradas.");
     if (result) {
       setPack(result.copy);

@@ -6,12 +6,20 @@ import { Badge, Button, Card, Empty, ErrorBox, Field, Loading, Notice, PageHeade
 import type { Tone } from "../components/ui";
 import { useAction, useAsync } from "../lib/hooks";
 
-const REASON_LABEL: Record<string, { label: string; tone: Tone }> = {
-  perfil: { label: "do seu perfil", tone: "info" },
-  dados_proprios: { label: "seus resultados (observado)", tone: "ok" },
-  radar: { label: "radar (observado)", tone: "ok" },
-  material: { label: "material disponível", tone: "ok" },
+const KIND_LABEL: Record<string, string> = {
+  perfil: "seu perfil",
+  dados_proprios: "seus resultados",
+  radar: "radar",
+  material: "material disponível",
+  hipotese: "hipótese",
+};
+
+// The badge follows the kind of EVIDENCE, so a hypothesis is never shown as an observation.
+const EVIDENCE_LABEL: Record<string, { label: string; tone: Tone }> = {
+  observado: { label: "observado", tone: "ok" },
+  estimativa: { label: "estimativa", tone: "info" },
   hipotese: { label: "hipótese", tone: "warn" },
+  perfil: { label: "informado por você", tone: "info" },
 };
 
 const STATUSES = [
@@ -26,10 +34,10 @@ function Reasons({ reasons }: { reasons: IdeaReason[] }) {
   return (
     <ul className="small stack" style={{ paddingLeft: 18 }}>
       {reasons.map((r, i) => {
-        const info = REASON_LABEL[r.kind] ?? { label: r.kind, tone: "neutral" as Tone };
+        const info = EVIDENCE_LABEL[r.evidence] ?? { label: r.evidence, tone: "neutral" as Tone };
         return (
           <li key={i}>
-            <Badge tone={info.tone}>{info.label}</Badge> {r.text}
+            <Badge tone={info.tone}>{`${KIND_LABEL[r.kind] ?? r.kind}: ${info.label}`}</Badge> {r.text}
           </li>
         );
       })}

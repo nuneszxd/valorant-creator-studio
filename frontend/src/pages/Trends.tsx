@@ -8,6 +8,7 @@ import { useJobs } from "../components/JobsContext";
 import { Badge, Button, Card, Checkbox, Empty, ErrorBox, Field, Loading, Notice, NumberInput, PageHeader, Select, Tabs, TextArea, TextInput } from "../components/ui";
 import { confidenceTone, fmtDate, fmtNumber } from "../lib/format";
 import { useAction, useAsync } from "../lib/hooks";
+import { RUN_STATUS, labelOf } from "../lib/labels";
 
 const KIND_LABEL: Record<string, string> = {
   tema: "tema", hashtag: "hashtags", duracao: "duração", gancho_titulo: "padrões de título", agente: "agentes",
@@ -173,6 +174,10 @@ function Collect({ status, onDone }: { status: RadarStatus | null; onDone: () =>
   const list = queries.split("\n").map((q) => q.trim()).filter(Boolean);
   const cost = list.length * (pages ?? 1);
   const active = (summary?.active ?? []).filter((j) => j.kind.startsWith("radar_"));
+  const remaining = status?.youtube.quota.search_calls_remaining ?? 0;
+  const overQuota = status?.youtube.configured === true && cost > remaining;
+  const recent = useAsync(() => api.get<Job[]>("/api/jobs?limit=10"), [summary?.active.length ?? 0]);
+  const lastRadarJob = (recent.data ?? []).find((j) => j.kind.startsWith("radar_"));
 
   async function startYoutube() {
     const job = await run(
@@ -192,6 +197,9 @@ function Collect({ status, onDone }: { status: RadarStatus | null; onDone: () =>
   return (
     <div className="stack">
       {active.length > 0 && <div className="jobs-panel">{active.map((j) => <JobStatus key={j.id} job={j} />)}</div>}
+      {active.length === 0 && lastRadarJob && lastRadarJob.state === "failed" && (
+        <Notice tone="warn">A última coleta falhou ({lastRadarJob.label}): {lastRadarJob.error ?? "sem detalhes"}</Notice>
+      )}
       <div className="grid grid-2">
         <Card title="YouTube (API oficial)">
           <div className="stack">
@@ -223,7 +231,17 @@ function Collect({ status, onDone }: { status: RadarStatus | null; onDone: () =>
             <p className="muted small">
               Vídeos curtos (&lt; 4 min) retornados pela busca pública. A API não separa Shorts com segurança e o gancho falado não é acessível.
             </p>
-            <div><Button variant="primary" onClick={startYoutube} busy={busy} disabled={!status?.youtube.configured || list.length === 0}>Coletar do YouTube</Button></div>
+            {overQuota && (
+              <Notice tone="warn">
+                Esta coleta usaria {cost} busca(s), mas restam {remaining} hoje. Reduza as consultas/páginas ou espere a cota renovar
+                (meia-noite, horário do Pacífico).
+              </Notice>
+            )}
+            <div>
+              <Button variant="primary" onClick={startYoutube} busy={busy} disabled={!status?.youtube.configured || list.length === 0 || overQuota}>
+                Coletar do YouTube
+              </Button>
+            </div>
           </div>
         </Card>
 
@@ -376,7 +394,7 @@ function History({ onOpen }: { onOpen: (id: number) => void }) {
                     <td>{r.id}</td>
                     <td>{SOURCE_LABEL[r.source] ?? r.source}</td>
                     <td>{fmtDate(r.collected_at)}</td>
-                    <td>{r.status}{r.error ? ` — ${r.error}` : ""}</td>
+                    <td>{labelOf(RUN_STATUS, r.status)}{r.error ? ` — ${r.error}` : ""}</td>
                     <td>{r.sample_size}</td>
                     <td>{r.trends_count ?? 0}</td>
                     <td className="nowrap">

@@ -16,8 +16,35 @@ _NON_WORD = re.compile(r"\W+")
 _BAD_ASS = re.compile(r"[{}\\\r\n]")
 
 
+MAX_CUE_WORDS = 14
+MAX_CUE_CHARS = 120
+MAX_GAP_S = 0.8
+
+
+def _split_words(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Split a long run of words into readable cues (a pause or a size limit starts a new one)."""
+    groups: list[list[dict[str, Any]]] = []
+    current: list[dict[str, Any]] = []
+    chars = 0
+    for word in words:
+        gap = word["start"] - current[-1]["end"] if current else 0.0
+        extra = len(word["text"]) + (1 if current else 0)
+        if current and (len(current) >= MAX_CUE_WORDS or chars + extra > MAX_CUE_CHARS or gap > MAX_GAP_S):
+            groups.append(current)
+            current, chars, extra = [], 0, len(word["text"])
+        current.append(word)
+        chars += extra
+    if current:
+        groups.append(current)
+    return groups
+
+
 def cues_from_segments(segments: list[dict[str, Any]], clip_start: float, clip_end: float) -> list[dict[str, Any]]:
-    """Build cues (times relative to the clip) from stored transcript segments."""
+    """Build cues (times relative to the clip) from stored transcript segments.
+
+    Long segments are split into several short cues so every cue is readable on screen and stays
+    within the limits the API accepts (300 characters, 80 words).
+    """
     cues: list[dict[str, Any]] = []
     for seg in segments:
         if seg["end_s"] <= clip_start or seg["start_s"] >= clip_end:
@@ -31,16 +58,23 @@ def cues_from_segments(segments: list[dict[str, Any]], clip_start: float, clip_e
                 "end": round(min(w["end"], clip_end) - clip_start, 3),
                 "text": w["text"],
             })
-        if words:
-            start, end = words[0]["start"], words[-1]["end"]
-            text = " ".join(w["text"] for w in words)
-        else:
+        if not words:
+            # No word timestamps (for example whisper.cpp): spread the words evenly over the segment.
+            tokens = seg["text"].split()
             start = max(seg["start_s"], clip_start) - clip_start
             end = min(seg["end_s"], clip_end) - clip_start
-            text = seg["text"].strip()
-        if end - start < 0.05 or not text:
-            continue
-        cues.append({"start": round(start, 3), "end": round(end, 3), "text": text, "words": words})
+            if tokens and end - start > 0:
+                step = (end - start) / len(tokens)
+                words = [
+                    {"start": round(start + i * step, 3), "end": round(start + (i + 1) * step, 3), "text": tok}
+                    for i, tok in enumerate(tokens)
+                ]
+        for group in _split_words(words):
+            start, end = group[0]["start"], group[-1]["end"]
+            text = " ".join(w["text"] for w in group)
+            if end - start < 0.05 or not text:
+                continue
+            cues.append({"start": round(start, 3), "end": round(end, 3), "text": text, "words": group})
     return cues
 
 

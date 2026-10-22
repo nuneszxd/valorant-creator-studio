@@ -20,6 +20,7 @@ from ..streaming import range_file_response
 from ..utils import deep_merge
 from .candidates import validate_range, validate_type
 from .deps import Ctx
+from .jobs import present as jobs_present
 
 router = APIRouter(prefix="/api/clips", tags=["cortes"])
 
@@ -154,7 +155,8 @@ def list_clips(
         clip["recording_name"] = recording.get("name")
         clip["map"] = clip.get("map") or recording.get("map")
         clip["agent"] = clip.get("agent") or recording.get("agent")
-        clip["score"] = candidate["score"] if candidate else None
+        # Manual cuts have no automatic score: show "no score", never a made-up 0.
+        clip["score"] = candidate["score"] if candidate and not candidate.get("manual") else None
         out.append(clip)
     return out
 
@@ -200,12 +202,18 @@ def get_clip(clip_id: int, c: Ctx) -> dict:
     active = c.repos.jobs.list(
         "clip_id = ? AND state IN ('queued', 'running')", (clip_id,), order_by="id DESC", limit=5
     )
+    latest = c.repos.jobs.list("clip_id = ?", (clip_id,), order_by="id DESC", limit=1)
     return {
         **present(clip),
         "recording": {k: recording.get(k) for k in ("id", "name", "duration_s", "width", "height", "map", "agent",
                                                     "audio_streams", "video_codec", "audio_codec")},
-        "candidate": ({k: candidate.get(k) for k in ("id", "score", "confidence", "excerpt")} if candidate else None),
+        "candidate": (
+            {**{k: candidate.get(k) for k in ("id", "score", "confidence", "excerpt")}, "manual": bool(candidate.get("manual"))}
+            if candidate else None
+        ),
         "active_jobs": active,
+        # Lets the editor surface a failed transcription/render/preview instead of failing silently.
+        "last_job": jobs_present(latest[0]) if latest else None,
     }
 
 

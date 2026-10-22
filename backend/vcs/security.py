@@ -54,15 +54,33 @@ class LocalOnlyMiddleware:
         if host not in self.allowed_hosts:
             await self._deny(send, "Host não permitido: o aplicativo só responde em localhost.")
             return
+        # Backslashes / leading "//" would let a crafted URL reach UNC paths (SMB) on Windows.
+        path = scope.get("path", "")
+        if "\\" in path or "\x00" in path or path.startswith("//"):
+            await self._deny(send, "Caminho inválido.")
+            return
+        # Browsers label cross-site subresource loads (<img>, <video>, fetch...) on every method.
+        if headers.get("sec-fetch-site") == "cross-site":
+            await self._deny(send, "Requisição entre sites bloqueada.")
+            return
         if scope["method"] not in SAFE_METHODS:
             origin = headers.get("origin")
             if origin is not None and origin not in self.allowed_origins:
                 await self._deny(send, "Origem não permitida para esta operação.")
                 return
-            if headers.get("sec-fetch-site") == "cross-site":
-                await self._deny(send, "Requisição entre sites bloqueada.")
-                return
-        await self.app(scope, receive, send)
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                extra = [
+                    (b"x-frame-options", b"DENY"),
+                    (b"content-security-policy", b"frame-ancestors 'none'"),
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"referrer-policy", b"no-referrer"),
+                ]
+                message = {**message, "headers": [*message.get("headers", []), *extra]}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
     @staticmethod
     async def _deny(send, message: str) -> None:
@@ -83,6 +101,13 @@ class LocalOnlyMiddleware:
 # --------------------------------------------------------------------------- paths
 
 
+def _reject_network_path(value: str, path: Path) -> None:
+    """Refuse UNC / network paths before touching the filesystem (resolving them would open SMB)."""
+    drive = getattr(path, "drive", "") or ""
+    if value.startswith("\\\\") or value.startswith("//") or drive.startswith("\\\\") or drive.startswith("//"):
+        raise InvalidInput("Caminhos de rede (UNC) não são aceitos. Copie o arquivo para um disco local.")
+
+
 def validate_media_file(raw: str) -> Path:
     """Validate a user-provided path to a local video file and return its resolved path."""
     if not isinstance(raw, str) or not raw.strip():
@@ -90,11 +115,8 @@ def validate_media_file(raw: str) -> Path:
     value = raw.strip().strip('"')
     if "\x00" in value:
         raise InvalidInput("Caminho inválido.")
-    if value.startswith("\\\\") or value.startswith("//"):
-        raise InvalidInput(
-            "Caminhos de rede (UNC) não são aceitos. Copie o arquivo para um disco local."
-        )
     path = Path(value).expanduser()
+    _reject_network_path(value, path)
     if not path.is_absolute():
         raise InvalidInput(
             "Use o caminho completo do arquivo (por exemplo, C:\\Videos\\partida.mp4)."
@@ -103,6 +125,7 @@ def validate_media_file(raw: str) -> Path:
         resolved = path.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise NotFound(f"Arquivo não encontrado: {value}") from exc
+    _reject_network_path("", resolved)
     if not resolved.is_file():
         raise InvalidInput("O caminho informado não é um arquivo.")
     if resolved.suffix.lower() not in VIDEO_EXTENSIONS:
@@ -117,9 +140,10 @@ def validate_directory(raw: str, *, create: bool = False) -> Path:
     if not isinstance(raw, str) or not raw.strip():
         raise InvalidInput("Informe o caminho da pasta.")
     value = raw.strip().strip('"')
-    if "\x00" in value or value.startswith("\\\\") or value.startswith("//"):
-        raise InvalidInput("Caminho de pasta inválido (caminhos de rede não são aceitos).")
+    if "\x00" in value:
+        raise InvalidInput("Caminho de pasta inválido.")
     path = Path(value).expanduser()
+    _reject_network_path(value, path)
     if not path.is_absolute():
         raise InvalidInput("Use o caminho completo da pasta.")
     if create:
@@ -131,6 +155,7 @@ def validate_directory(raw: str, *, create: bool = False) -> Path:
         resolved = path.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise NotFound(f"Pasta não encontrada: {value}") from exc
+    _reject_network_path("", resolved)
     if not resolved.is_dir():
         raise InvalidInput("O caminho informado não é uma pasta.")
     return resolved
@@ -163,7 +188,7 @@ def safe_filename(name: str, default: str = "arquivo", max_len: int = 80) -> str
 
 _KEY_VALUE = re.compile(
     r"(?i)\b(client[_-]?secret|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|password|secret|token)\b"
-    r"(\s*[=:]\s*)(?:Bearer\s+|OAuth\s+)?([^\s&\"',;]+)"
+    r"([\"']?\s*[=:]\s*[\"']?)(?:Bearer\s+|OAuth\s+)?([^\s&\"',;]+)"
 )
 _BEARER = re.compile(r"(?i)\b(bearer|oauth)\s+[A-Za-z0-9\-._~+/]{8,}=*")
 
@@ -175,6 +200,12 @@ def redact(text: str, secrets: Iterable[str] = ()) -> str:
     text = _KEY_VALUE.sub(lambda m: f"{m.group(1)}{m.group(2)}***", text)
     text = _BEARER.sub(lambda m: f"{m.group(1)} ***", text)
     return text
+
+
+def error_text(exc: BaseException, secrets: Iterable[str] = ()) -> str:
+    """User-facing text for an exception, with secrets masked, safe to store in the database."""
+    message = getattr(exc, "message", None) or f"{type(exc).__name__}: {exc}"
+    return redact(str(message), secrets)
 
 
 class RedactingFormatter(logging.Formatter):

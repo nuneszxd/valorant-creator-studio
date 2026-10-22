@@ -23,7 +23,7 @@ export function Candidates() {
   const [sort, setSort] = useState("score");
   const [version, setVersion] = useState(0);
   const list = useAsync(
-    () => api.get<Candidate[]>(`/api/candidates${qs({ recording_id: recordingId, status, type, min_score: minScore, sort })}`),
+    () => api.get<Candidate[]>(`/api/candidates${qs({ recording_id: recordingId, status, type, min_score: minScore, sort, limit: 300 })}`),
     [recordingId, status, type, minScore, sort, tick, version],
   );
   const selectedId = id ? Number(id) : null;
@@ -96,9 +96,13 @@ export function Candidates() {
                         </div>
                       </td>
                       <td className="nowrap">
-                        <Badge tone={scoreTone(c.score)} title="Pontuação de prioridade para a sua revisão (não é previsão de desempenho)">
-                          {c.score.toFixed(0)} pts
-                        </Badge>
+                        {c.manual ? (
+                          <Badge title="Corte criado por você: não tem pontuação automática">manual</Badge>
+                        ) : (
+                          <Badge tone={scoreTone(c.score)} title="Pontuação de prioridade para a sua revisão (não é previsão de desempenho)">
+                            {c.score.toFixed(0)} pts
+                          </Badge>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -174,8 +178,12 @@ function CandidateView({ id, onChanged }: { id: number; onChanged: () => void })
   const dirty = edit !== null;
   const maxTime = c.recording.duration_s ?? undefined;
 
+  // Pending edits (title, times, type) are always sent together with any other change, never discarded.
+  const pendingFields = () =>
+    dirty ? { title: form.title, start_s: form.start, end_s: form.end, moment_type: form.type } : {};
+
   async function patch(fields: Record<string, unknown>, message?: string) {
-    const updated = await run(() => api.patch<CandidateDetail>(`/api/candidates/${id}`, fields), message);
+    const updated = await run(() => api.patch<CandidateDetail>(`/api/candidates/${id}`, { ...pendingFields(), ...fields }), message);
     if (updated) {
       setEdit(null);
       detail.reload();
@@ -187,6 +195,11 @@ function CandidateView({ id, onChanged }: { id: number; onChanged: () => void })
     if (c.clip_id) {
       navigate(`/editor/${c.clip_id}`);
       return;
+    }
+    if (dirty) {
+      const saved = await run(() => api.patch<CandidateDetail>(`/api/candidates/${id}`, pendingFields()));
+      if (!saved) return;
+      setEdit(null);
     }
     const clip = await run(() => api.post<Clip>("/api/clips", { candidate_id: id }), "Corte criado e candidato aprovado.");
     if (clip) {
@@ -206,7 +219,7 @@ function CandidateView({ id, onChanged }: { id: number; onChanged: () => void })
     <div className="stack">
       <Card
         title={c.title}
-        actions={<>
+        actions={c.manual ? <Badge>corte manual</Badge> : <>
           <Badge tone={scoreTone(c.score)}>{c.score.toFixed(0)} pts</Badge>
           <Badge tone={confidenceTone(c.confidence)} title="Concordância entre os sinais detectados; não é probabilidade de acerto nem de viralização.">
             confiança {c.confidence}
@@ -290,7 +303,9 @@ function CandidateView({ id, onChanged }: { id: number; onChanged: () => void })
                   <strong>{r.label}</strong>
                   <div className="muted small">{r.detail}</div>
                 </div>
-                <div className="nowrap">{r.value === null ? <span className="muted">n/d</span> : `${r.points >= 0 ? "+" : ""}${r.points.toFixed(1)} pts`}</div>
+                <div className="nowrap">
+                  {r.value === null && r.points === 0 ? <span className="muted">n/d</span> : `${r.points >= 0 ? "+" : ""}${r.points.toFixed(1)} pts`}
+                </div>
                 {r.value !== null && <div className="reason-bar"><span style={{ width: `${Math.min(Math.abs(r.value), 1) * 100}%` }} /></div>}
               </div>
             ))}

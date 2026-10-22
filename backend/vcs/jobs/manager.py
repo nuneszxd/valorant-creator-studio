@@ -211,7 +211,16 @@ class JobManager:
         ctx = JobContext(self, job_id)
         with self._lock:
             self._contexts[job_id] = ctx
-        self.repo.update(job_id, state="running", started_at=utcnow())
+        # Conditional update: if the user cancelled the job in the instant between reading it and now,
+        # the state is no longer 'queued' and the job must not start.
+        started = self.db.execute_count(
+            "UPDATE jobs SET state = 'running', started_at = ? WHERE id = ? AND state = 'queued'",
+            (utcnow(), job_id),
+        )
+        if not started:
+            with self._lock:
+                self._contexts.pop(job_id, None)
+            return
         secrets = self.config.secrets()
         outcome: dict[str, Any]
         try:

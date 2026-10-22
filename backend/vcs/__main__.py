@@ -54,7 +54,10 @@ def _serve(args: argparse.Namespace) -> int:
     from .main import create_app
 
     app = create_app(config)
-    server = uvicorn.Server(uvicorn.Config(app, host=config.host, port=config.port, log_level="info"))
+    # timeout_graceful_shutdown: an open <video> keeps a streaming response alive; do not wait for it forever.
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=config.host, port=config.port, log_level="info", timeout_graceful_shutdown=5)
+    )
     app.state.server = server
     url = f"http://{'127.0.0.1' if config.host == 'localhost' else config.host}:{config.port}"
     print(f"\nValorant Creator Studio em {url}  (Ctrl+C para encerrar)\n")

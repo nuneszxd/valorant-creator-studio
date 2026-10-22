@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -87,22 +88,18 @@ def facets(c: Ctx) -> dict:
 # --------------------------------------------------------------------------- cleanup
 
 
-def _managed_dirs(c: Any) -> list[Path]:
-    dirs = [c.config.previews_dir, c.config.work_dir, c.settings.effective_output_dir(), c.config.default_output_dir]
-    seen: list[Path] = []
-    for d in dirs:
-        if d not in seen:
-            seen.append(d)
-    return seen
+def _norm(path: str) -> str:
+    """Case/symlink/relative-insensitive form used to compare paths (Windows paths are case-insensitive)."""
+    return os.path.normcase(os.path.realpath(path))
 
 
 def _original_paths(c: Any) -> set[str]:
-    return {r["path"] for r in c.db.query("SELECT path FROM recordings")}
+    return {_norm(r["path"]) for r in c.db.query("SELECT path FROM recordings")}
 
 
-def _deletable(row: dict[str, Any], originals: set[str]) -> tuple[bool, str]:
+def _deletable(c: Any, row: dict[str, Any], originals: set[str]) -> tuple[bool, str]:
     path = Path(row["path"])
-    if row["path"] in originals:
+    if _norm(row["path"]) in originals:
         return False, "é uma gravação original"
     if row["kind"] not in DELETABLE_KINDS:
         return False, "tipo de arquivo não removível por aqui"
@@ -110,6 +107,8 @@ def _deletable(row: dict[str, Any], originals: set[str]) -> tuple[bool, str]:
         return False, "extensão não removível por aqui"
     if not path.is_file():
         return False, "arquivo não existe mais"
+    if row["kind"] == "temp" and c.repos.jobs.count("kind = 'render' AND state IN ('queued', 'running')"):
+        return False, "uma renderização está em andamento"
     return True, ""
 
 
@@ -119,24 +118,15 @@ def cleanup_preview(c: Ctx) -> dict:
     originals = _original_paths(c)
     items = []
     for row in c.repos.artifacts.list(order_by="id DESC"):
-        ok, reason = _deletable(row, originals)
+        ok, reason = _deletable(c, row, originals)
         items.append({**row, "exists": Path(row["path"]).is_file(), "deletable": ok, "reason": reason})
-    partials = []
-    for directory in _managed_dirs(c):
-        if directory.is_dir():
-            for part in directory.glob("*.part"):
-                try:
-                    partials.append({"path": str(part), "size_bytes": part.stat().st_size})
-                except OSError:
-                    continue
     total = sum(i["size_bytes"] or 0 for i in items if i["deletable"])
-    return {"artifacts": items, "partials": partials, "deletable_bytes": total,
-            "note": "Gravações originais nunca aparecem como removíveis."}
+    return {"artifacts": items, "deletable_bytes": total,
+            "note": "Só aparecem arquivos que o próprio aplicativo registrou. Gravações originais nunca são removíveis."}
 
 
 class CleanupBody(Strict):
     artifact_ids: list[int] = Field(default_factory=list, max_length=2000)
-    delete_partials: bool = False
     confirm: bool = False
 
 
@@ -152,7 +142,7 @@ def cleanup(body: CleanupBody, c: Ctx) -> dict:
         row = c.repos.artifacts.get(artifact_id)
         if row is None:
             continue
-        ok, reason = _deletable(row, originals)
+        ok, reason = _deletable(c, row, originals)
         if not ok:
             if reason == "arquivo não existe mais":
                 c.repos.artifacts.delete(artifact_id)
@@ -173,13 +163,4 @@ def cleanup(body: CleanupBody, c: Ctx) -> dict:
             )
         elif row["kind"] == "preview":
             c.db.execute("UPDATE clips SET preview_path = NULL WHERE preview_path = ?", (row["path"],))
-    if body.delete_partials:
-        for directory in _managed_dirs(c):
-            if directory.is_dir():
-                for part in directory.glob("*.part"):
-                    try:
-                        part.unlink()
-                        deleted.append(str(part))
-                    except OSError as exc:
-                        failed.append({"path": str(part), "reason": exc.strerror or str(exc)})
     return {"deleted": deleted, "failed": failed}

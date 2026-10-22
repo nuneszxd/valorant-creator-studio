@@ -50,7 +50,7 @@ criação de conteúdo com base em dados reais e resultados mensuráveis. Backen
 - [Arquitetura](docs/architecture.md)
 - [Segurança e privacidade](docs/security.md)
 - [Fontes de dados do radar e da importação de VODs](docs/data-sources.md)
-- API interativa (com o app rodando): `http://127.0.0.1:8000/api/docs`
+- Contrato da API (com o app rodando): `http://127.0.0.1:8000/api/openapi.json` (interface Swagger em `/api/docs` com `VCS_API_DOCS=1`)
 
 ## Estrutura
 

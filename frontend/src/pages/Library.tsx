@@ -7,6 +7,7 @@ import { useJobs } from "../components/JobsContext";
 import { Badge, Button, Card, Checkbox, Empty, ErrorBox, Field, Loading, Notice, NumberInput, PageHeader, Select, Tabs, TextInput } from "../components/ui";
 import { fmtBytes, fmtDate, fmtTime } from "../lib/format";
 import { useAction, useAsync } from "../lib/hooks";
+import { RECORDING_STATUS, labelOf } from "../lib/labels";
 
 interface Filters {
   q: string;
@@ -31,6 +32,7 @@ export function Library() {
   const opt = (label: string, values: string[]) => [{ value: "", label }, ...values.map((v) => ({ value: v, label: v }))];
 
   const showMap = tab !== "pubs" && tab !== "cleanup";
+  const showGame = tab === "recordings";
   return (
     <div className="stack">
       <PageHeader
@@ -51,7 +53,7 @@ export function Library() {
       {tab !== "cleanup" && (
         <div className="row wrap">
           <TextInput placeholder="Buscar…" value={f.q} onChange={(e) => set({ q: e.target.value })} style={{ maxWidth: 200 }} />
-          {showMap && <Select value={f.game} onChange={(v) => set({ game: v })} options={opt("Todos os jogos", facets.data?.games ?? [])} style={{ maxWidth: 160 }} />}
+          {showGame && <Select value={f.game} onChange={(v) => set({ game: v })} options={opt("Todos os jogos", facets.data?.games ?? [])} style={{ maxWidth: 160 }} />}
           {showMap && <Select value={f.map} onChange={(v) => set({ map: v })} options={opt("Todos os mapas", facets.data?.maps ?? [])} style={{ maxWidth: 160 }} />}
           {showMap && <Select value={f.agent} onChange={(v) => set({ agent: v })} options={opt("Todos os agentes", facets.data?.agents ?? [])} style={{ maxWidth: 170 }} />}
           {(tab === "clips" || tab === "candidates") && (
@@ -154,8 +156,8 @@ function CandidatesTab({ f }: { f: Filters }) {
                   <tr key={c.id} className="clickable" onClick={() => navigate(`/candidates/${c.id}`)}>
                     <td>{c.title}<div className="muted small">{c.recording_name} · {fmtTime(c.start_s)}–{fmtTime(c.end_s)}</div></td>
                     <td>{c.type_label}</td>
-                    <td>{c.score.toFixed(0)}</td>
-                    <td>{c.confidence}</td>
+                    <td>{c.manual ? "manual" : c.score.toFixed(0)}</td>
+                    <td>{c.manual ? "–" : c.confidence}</td>
                     <td><Badge tone={c.status === "approved" ? "ok" : c.status === "rejected" ? "danger" : "neutral"}>{c.status_label}</Badge></td>
                     <td>{c.outcome_label ?? "–"}</td>
                   </tr>
@@ -193,7 +195,7 @@ function RecordingsTab({ f }: { f: Filters }) {
                     <td>{r.game}</td>
                     <td>{[r.map, r.agent].filter(Boolean).join(" / ") || "–"}</td>
                     <td>{fmtTime(r.duration_s)}</td>
-                    <td>{r.status}</td>
+                    <td>{labelOf(RECORDING_STATUS, r.status)}</td>
                     <td>{r.clips_count ?? 0}</td>
                     <td>{fmtDate(r.imported_at)}</td>
                   </tr>
@@ -246,13 +248,14 @@ function CleanupTab() {
   const { run, busy } = useAction();
   const preview = useAsync(() => api.get<CleanupPreview>("/api/cleanup/preview"), []);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [partials, setPartials] = useState(false);
 
   if (preview.loading && !preview.data) return <Loading />;
   if (!preview.data) return <ErrorBox error={preview.error} />;
   const items = preview.data.artifacts;
-  const deletable = items.filter((a) => a.deletable);
-  const totalBytes = deletable.filter((a) => selected.has(a.id)).reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
+  // Rows whose file no longer exists can be removed from the registry (nothing is deleted from disk).
+  const orphan = (a: { deletable: boolean; reason: string }) => !a.deletable && a.reason === "arquivo não existe mais";
+  const selectable = items.filter((a) => a.deletable || orphan(a));
+  const totalBytes = selectable.filter((a) => selected.has(a.id)).reduce((sum, a) => sum + (a.size_bytes ?? 0), 0);
 
   function toggle(id: number) {
     setSelected((prev) => {
@@ -265,12 +268,11 @@ function CleanupTab() {
 
   async function remove() {
     const message =
-      `Apagar ${selected.size} arquivo(s) do disco (${fmtBytes(totalBytes)})` +
-      `${partials ? ` e ${preview.data?.partials.length ?? 0} arquivo(s) parcial(is)` : ""}?\n\n` +
+      `Apagar ${selected.size} item(ns) selecionado(s) do disco (${fmtBytes(totalBytes)})?\n\n` +
       "Esta ação não pode ser desfeita. Gravações originais nunca são apagadas por aqui.";
     if (!window.confirm(message)) return;
     const result = await run(() => api.post<{ deleted: string[]; failed: Array<{ path: string; reason: string }> }>("/api/cleanup", {
-      artifact_ids: Array.from(selected), delete_partials: partials, confirm: true,
+      artifact_ids: Array.from(selected), confirm: true,
     }));
     if (result) {
       window.alert(`${result.deleted.length} arquivo(s) apagado(s).` + (result.failed.length ? `\n${result.failed.length} falharam:\n${result.failed.map((x) => `${x.path}: ${x.reason}`).join("\n")}` : ""));
@@ -285,11 +287,11 @@ function CleanupTab() {
         Aqui aparecem só os arquivos que o próprio aplicativo criou (cortes exportados, prévias). Nada é apagado sem a sua
         confirmação, e as gravações originais nunca entram nesta lista como removíveis.
       </Notice>
-      {items.length === 0 && preview.data.partials.length === 0 && <Empty>Nenhum arquivo gerado pelo aplicativo.</Empty>}
+      {items.length === 0 && <Empty>Nenhum arquivo gerado pelo aplicativo.</Empty>}
       {items.length > 0 && (
         <Card
           title="Arquivos gerados"
-          actions={<Button variant="ghost" onClick={() => setSelected(new Set(deletable.map((a) => a.id)))}>Selecionar todos os removíveis</Button>}
+          actions={<Button variant="ghost" onClick={() => setSelected(new Set(selectable.map((a) => a.id)))}>Selecionar todos os removíveis</Button>}
         >
           <div className="table-wrap">
             <table>
@@ -297,11 +299,15 @@ function CleanupTab() {
               <tbody>
                 {items.map((a) => (
                   <tr key={a.id}>
-                    <td><input type="checkbox" disabled={!a.deletable} checked={selected.has(a.id)} onChange={() => toggle(a.id)} aria-label={`Selecionar ${a.path}`} /></td>
-                    <td>{a.kind === "export" ? "exportação" : a.kind === "preview" ? "prévia" : a.kind}</td>
+                    <td><input type="checkbox" disabled={!(a.deletable || orphan(a))} checked={selected.has(a.id)} onChange={() => toggle(a.id)} aria-label={`Selecionar ${a.path}`} /></td>
+                    <td>{a.kind === "export" ? "exportação" : a.kind === "preview" ? "prévia" : a.kind === "temp" ? "temporário (render interrompido)" : a.kind}</td>
                     <td><code>{a.path}</code></td>
                     <td>{fmtBytes(a.size_bytes)}</td>
-                    <td>{a.deletable ? <Badge tone="ok">removível</Badge> : <Badge tone="neutral">{a.reason}</Badge>}</td>
+                    <td>
+                      {a.deletable ? <Badge tone="ok">removível</Badge>
+                        : orphan(a) ? <Badge tone="warn" title="O arquivo já não existe; só o registro será removido">arquivo ausente — limpar registro</Badge>
+                        : <Badge tone="neutral">{a.reason}</Badge>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -309,14 +315,8 @@ function CleanupTab() {
           </div>
         </Card>
       )}
-      {preview.data.partials.length > 0 && (
-        <Card title="Arquivos parciais (renderizações interrompidas)">
-          <Checkbox checked={partials} onChange={setPartials} label={`Incluir ${preview.data.partials.length} arquivo(s) .part na limpeza`} />
-          <ul className="small">{preview.data.partials.map((p) => <li key={p.path}><code>{p.path}</code> ({fmtBytes(p.size_bytes)})</li>)}</ul>
-        </Card>
-      )}
       <div className="row">
-        <Button variant="danger" onClick={remove} busy={busy} disabled={selected.size === 0 && !partials}>Apagar selecionados…</Button>
+        <Button variant="danger" onClick={remove} busy={busy} disabled={selected.size === 0}>Apagar selecionados…</Button>
         <span className="muted small">Selecionado: {fmtBytes(totalBytes)}</span>
       </div>
     </div>

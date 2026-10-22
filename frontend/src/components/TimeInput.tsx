@@ -17,8 +17,9 @@ export function TimeInput(props: { value: number; onChange: (seconds: number) =>
       return;
     }
     const bounded = props.max !== undefined ? Math.min(parsed, props.max) : parsed;
-    props.onChange(bounded);
-    setText(fmtPrecise(bounded));
+    // Only report a real change: re-typing the same position must not mark the form as edited.
+    if (Math.abs(bounded - props.value) >= 0.05) props.onChange(bounded);
+    else setText(fmtPrecise(props.value));
   }
 
   return (

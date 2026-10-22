@@ -228,8 +228,9 @@ export interface Clip {
 
 export interface ClipDetail extends Clip {
   recording: { id: number; name: string; duration_s: number | null; width: number | null; height: number | null; map: string | null; agent: string | null; audio_streams: number; video_codec: string | null; audio_codec: string | null };
-  candidate: { id: number; score: number; confidence: string; excerpt: string | null } | null;
+  candidate: { id: number; score: number; confidence: string; excerpt: string | null; manual?: boolean } | null;
   active_jobs: Job[];
+  last_job?: Job | null;
 }
 
 export interface RenderPlan {
@@ -510,7 +511,6 @@ export interface CleanupArtifact {
 
 export interface CleanupPreview {
   artifacts: CleanupArtifact[];
-  partials: Array<{ path: string; size_bytes: number }>;
   deletable_bytes: number;
   note: string;
 }

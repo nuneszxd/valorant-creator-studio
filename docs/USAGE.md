@@ -137,10 +137,15 @@ Mande, nesta ordem (copie e cole o texto; não precisa ocultar nada, nenhum dele
 
 ## 9. Modo desenvolvimento (opcional)
 
+Defina `VCS_DEV=1` no `.env` (confia na origem do servidor de desenvolvimento e liga a documentação interativa) e então:
+
 ```powershell
 .venv\Scripts\python.exe -m vcs serve         # API em http://127.0.0.1:8000 (docs interativas em /api/docs)
 cd frontend; npm run dev                      # interface em http://127.0.0.1:5173 com proxy para a API
 ```
+
+O contrato OpenAPI fica sempre disponível em `http://127.0.0.1:8000/api/openapi.json`. A página interativa (`/api/docs`, Swagger) carrega scripts
+de uma CDN e por isso só liga com `VCS_DEV=1` ou `VCS_API_DOCS=1`.
 
 Testes: `setup.bat -WithDev` e depois `.venv\Scripts\python.exe -m pytest backend` e, em `frontend/`, `npm test`.
 

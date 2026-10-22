@@ -248,29 +248,107 @@ def test_overview_and_facets(client, recording):
 
 
 def test_cleanup_requires_confirmation_and_never_deletes_originals(client, ctx, recording, app_config):
-    export = app_config.default_output_dir / "corte.mp4"
-    export.parent.mkdir(parents=True, exist_ok=True)
+    from pathlib import Path
+
+    out = app_config.default_output_dir
+    out.mkdir(parents=True, exist_ok=True)
+    export = out / "corte.mp4"
     export.write_bytes(b"x" * 10)
     ctx.repos.artifacts.register("export", str(export), 10)
-    original_artifact = ctx.repos.artifacts.insert(kind="export", path=recording["path"], size_bytes=16)
-    partial = app_config.default_output_dir / "meio.mp4.part"
-    partial.write_bytes(b"y")
+    # An artifact row that points at an original recording - even through "..", must never be deletable.
+    sneaky = str(Path(recording["path"]).parent / "sub" / ".." / Path(recording["path"]).name)
+    original_artifact = ctx.repos.artifacts.insert(kind="export", path=sneaky, size_bytes=16)
+    # A leftover of an interrupted render is registered by the app; a stranger's .part file is not.
+    leftover = out / "meio.mp4.part"
+    leftover.write_bytes(b"y")
+    ctx.repos.artifacts.register("temp", str(leftover), 1)
+    stranger = out / "download_do_navegador.mp4.part"
+    stranger.write_bytes(b"z")
+    gone = ctx.repos.artifacts.insert(kind="export", path=str(out / "sumiu.mp4"), size_bytes=5)
 
     preview = client.get("/api/cleanup/preview").json()
     by_path = {a["path"]: a for a in preview["artifacts"]}
     assert by_path[str(export)]["deletable"] is True
-    assert by_path[recording["path"]]["deletable"] is False
-    assert any(p["path"] == str(partial) for p in preview["partials"])
+    assert by_path[sneaky]["deletable"] is False and "original" in by_path[sneaky]["reason"]
+    assert by_path[str(leftover)]["deletable"] is True
+    assert str(stranger) not in by_path  # files the app did not register are never offered
+    assert by_path[str(out / "sumiu.mp4")]["reason"] == "arquivo não existe mais"
 
     ids = [a["id"] for a in preview["artifacts"]]
     refused = client.post("/api/cleanup", json={"artifact_ids": ids})
     assert refused.status_code == 422 and export.exists()
 
-    done = client.post("/api/cleanup", json={"artifact_ids": ids, "delete_partials": True, "confirm": True}).json()
-    assert str(export) in done["deleted"] and str(partial) in done["deleted"]
-    assert any(f["path"] == recording["path"] for f in done["failed"])
-    assert not export.exists() and not partial.exists()
-    from pathlib import Path
-
-    assert Path(recording["path"]).exists()
+    done = client.post("/api/cleanup", json={"artifact_ids": ids, "confirm": True}).json()
+    assert str(export) in done["deleted"] and str(leftover) in done["deleted"]
+    assert any(f["path"] == sneaky for f in done["failed"])
+    assert not export.exists() and not leftover.exists()
+    assert Path(recording["path"]).exists() and stranger.exists()
+    assert ctx.repos.artifacts.get(gone["id"]) is None  # stale registry row cleaned, nothing deleted from disk
     assert original_artifact["id"] in ids
+
+
+def test_publication_urls_and_counts_are_validated(client):
+    for bad in ("javascript:alert(1)", "ftp://x.test/a", "https://a b.test"):
+        assert client.post("/api/publications", json={"platform": "tiktok", "url": bad}).status_code == 422
+    assert client.post("/api/publications", json={"platform": "tiktok", "views": 10**15}).status_code == 422
+    ok = client.post("/api/publications", json={"platform": "tiktok", "url": "https://www.tiktok.com/@a/video/1"})
+    assert ok.status_code == 201
+    assert client.post("/api/publications", json={"platform": "tiktok", "url": ""}).json()["url"] is None
+    assert client.post("/api/radar/manual", json={"platform": "tiktok", "title": "x", "url": "javascript:1"}).status_code == 422
+
+
+def test_manual_cut_has_no_invented_score_and_failed_jobs_are_visible(client, ctx, recording):
+    from vcs.errors import AppError
+
+    cand = new_candidate(client, recording)
+    clip = client.post("/api/clips", json={"candidate_id": cand["id"]}).json()
+    listed = client.get("/api/clips").json()
+    assert listed[0]["score"] is None  # manual: no automatic score, never a made-up 0
+    detail = client.get(f"/api/clips/{clip['id']}").json()
+    assert detail["candidate"]["manual"] is True and detail["last_job"] is None
+
+    def boom(_ctx):
+        raise AppError("O modelo de transcrição 'base' ainda não foi baixado.")
+
+    job = ctx.jobs.submit("transcribe_clip", "Transcrever corte", boom, clip_id=clip["id"])
+    from .conftest import wait_for
+
+    wait_for(lambda: client.get(f"/api/jobs/{job['id']}").json()["state"] == "failed")
+    last = client.get(f"/api/clips/{clip['id']}").json()["last_job"]
+    assert last["state"] == "failed" and "não foi baixado" in last["error"]
+
+
+def test_crash_recovery_restores_the_previous_status(ctx, app_config, recording):
+    from vcs.context import build_context
+
+    ctx.repos.recordings.update(recording["id"], status="analyzing")
+    ctx.repos.analyses.insert(recording_id=recording["id"], level="leve", options={}, status="done")
+    fresh = ctx.repos.recordings.insert(name="b.mp4", path="C:/b.mp4", imported_at="2026-01-01T00:00:00+00:00",
+                                        status="analyzing")
+    with_output = ctx.repos.clips.insert(recording_id=recording["id"], title="c", start_s=0, end_s=10,
+                                         status="rendering", output_path="C:/out.mp4")
+    without_output = ctx.repos.clips.insert(recording_id=recording["id"], title="d", start_s=0, end_s=10,
+                                            status="rendering")
+    reopened = build_context(app_config)
+    assert reopened.repos.recordings.require(recording["id"])["status"] == "analyzed"
+    assert reopened.repos.recordings.require(fresh["id"])["status"] == "imported"
+    assert reopened.repos.clips.require(with_output["id"])["status"] == "ready"
+    assert reopened.repos.clips.require(without_output["id"])["status"] == "draft"
+
+
+def test_long_transcript_segments_become_short_valid_cues(client, ctx, recording):
+    from vcs.media.subtitles import cues_from_segments
+
+    words = [{"start": i * 0.4, "end": i * 0.4 + 0.35, "text": f"palavra{i}"} for i in range(60)]
+    segments = [{"start_s": 0.0, "end_s": 24.0, "text": " ".join(w["text"] for w in words), "words": words}]
+    cues = cues_from_segments(segments, 0.0, 24.0)
+    assert len(cues) >= 4
+    assert all(len(c["text"]) <= 120 and len(c["words"]) <= 14 for c in cues)
+    assert sum(len(c["words"]) for c in cues) == 60
+    # a segment without word timestamps is spread evenly instead of becoming one huge cue
+    plain = cues_from_segments([{"start_s": 0.0, "end_s": 20.0, "text": " ".join(["ola"] * 40), "words": []}], 0.0, 20.0)
+    assert len(plain) == 3 and plain[-1]["end"] == 20.0
+    # every generated cue is accepted by the clip API
+    clip = client.post("/api/clips", json={"recording_id": recording["id"], "start_s": 0, "end_s": 30}).json()
+    saved = client.patch(f"/api/clips/{clip['id']}", json={"subtitles": cues})
+    assert saved.status_code == 200, saved.text

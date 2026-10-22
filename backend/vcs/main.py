@@ -33,7 +33,8 @@ log = logging.getLogger(__name__)
 
 API_DESCRIPTION = (
     "API local do Valorant Creator Studio. Só responde em localhost; vídeos e áudios nunca saem "
-    "da máquina. Documentação interativa em /api/docs."
+    "da máquina. O contrato OpenAPI fica em /api/openapi.json (interface interativa em /api/docs "
+    "com VCS_API_DOCS=1)."
 )
 
 
@@ -62,7 +63,8 @@ def _mount_frontend(app: FastAPI, dist: Path) -> None:
     def spa(full_path: str) -> FileResponse:
         if full_path == "api" or full_path.startswith("api/"):
             raise NotFound("Rota não encontrada.")
-        if full_path:
+        # Never join drive-qualified, rooted or backslash paths: on Windows that can point at a network share.
+        if full_path and not (full_path.startswith("/") or "\\" in full_path or ":" in full_path):
             candidate = (dist / full_path).resolve()
             if candidate.is_file() and candidate.is_relative_to(dist_resolved):
                 return FileResponse(candidate)
@@ -86,7 +88,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         version=__version__,
         description=API_DESCRIPTION,
         lifespan=lifespan,
-        docs_url="/api/docs",
+        docs_url="/api/docs" if config.api_docs else None,
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )

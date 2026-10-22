@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type {
   ButtonHTMLAttributes,
   InputHTMLAttributes,
@@ -66,6 +67,14 @@ export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea {...props} className={`input ${props.className ?? ""}`} />;
 }
 
+function numberText(value: number | null): string {
+  return value === null || Number.isNaN(value) ? "" : String(value);
+}
+
+/**
+ * Numeric field that keeps what you type (including "-" or an empty box) while focused, and only
+ * applies defaults/clamping when you leave the field. Valid numbers are reported while typing.
+ */
 export function NumberInput(props: {
   value: number | null;
   onChange: (value: number | null) => void;
@@ -75,19 +84,50 @@ export function NumberInput(props: {
   placeholder?: string;
   disabled?: boolean;
 }) {
+  const [text, setText] = useState(numberText(props.value));
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setText(numberText(props.value));
+  }, [props.value]);
+
   return (
     <input
-      type="number"
+      type="text"
+      inputMode="decimal"
       className="input"
-      value={props.value === null || Number.isNaN(props.value) ? "" : props.value}
-      min={props.min}
-      max={props.max}
-      step={props.step}
+      value={text}
       placeholder={props.placeholder}
       disabled={props.disabled}
+      aria-valuemin={props.min}
+      aria-valuemax={props.max}
+      onFocus={() => {
+        focused.current = true;
+      }}
       onChange={(event) => {
         const raw = event.target.value;
-        props.onChange(raw === "" ? null : Number(raw));
+        setText(raw);
+        const parsed = Number(raw.trim().replace(",", "."));
+        if (raw.trim() !== "" && Number.isFinite(parsed)) props.onChange(parsed);
+      }}
+      onBlur={() => {
+        focused.current = false;
+        const raw = text.trim().replace(",", ".");
+        if (raw === "") {
+          props.onChange(null);
+          setText(numberText(props.value));
+          return;
+        }
+        const parsed = Number(raw);
+        if (!Number.isFinite(parsed)) {
+          setText(numberText(props.value));
+          return;
+        }
+        let bounded = parsed;
+        if (props.min !== undefined) bounded = Math.max(bounded, props.min);
+        if (props.max !== undefined) bounded = Math.min(bounded, props.max);
+        if (bounded !== parsed) props.onChange(bounded);
+        setText(String(bounded));
       }}
     />
   );

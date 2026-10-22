@@ -15,6 +15,7 @@ from ..errors import AppError, InvalidInput
 from ..jobs.manager import JobCancelled
 from ..media.extract import detect_scene_changes, extract_audio_envelope, extract_wav_window
 from ..media.transcribe import build_transcriber
+from ..security import error_text
 from ..utils import dumps, utcnow
 from .candidates import (
     CandidateDraft,
@@ -174,7 +175,7 @@ def run_analysis(
         app.repos.recordings.update(recording_id, status="analyzed" if prior_done else "imported")
         raise
     except Exception as exc:
-        message = exc.message if isinstance(exc, AppError) else f"{type(exc).__name__}: {exc}"
+        message = error_text(exc, app.config.secrets())
         app.repos.analyses.update(analysis["id"], status="error", error=message, finished_at=utcnow())
         app.repos.recordings.update(
             recording_id, status="analyzed" if prior_done else "imported", last_error=message
@@ -277,8 +278,11 @@ def _execute(ctx: Any, app: Any, recording: dict[str, Any], path: Path, plan: Pl
     # -- scoring ------------------------------------------------------------------
     ctx.set_progress(None, label("score"), force=True)
     drafts: list[CandidateDraft] = []
+    # Merge first: in "completo" mode the 5-minute chunks are adjacent, and a window that crosses a
+    # chunk boundary is still fully transcribed.
+    covered_ranges = merge_ranges(transcribed)
     for window in windows:
-        covered = any(a - 0.5 <= window.start and window.end <= b + 0.5 for a, b in transcribed)
+        covered = any(a - 0.5 <= window.start and window.end <= b + 0.5 for a, b in covered_ranges)
         window_segments = (
             [s for s in segments if s["end_s"] > window.start and s["start_s"] < window.end]
             if covered else None

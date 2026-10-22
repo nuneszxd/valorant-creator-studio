@@ -10,6 +10,20 @@ Cada afirmação abaixo tem uma marca:
 
 Termos, cotas e políticas mudam. Esta página é um ponto de partida datado, não uma garantia.
 
+## Como o aplicativo usa cada fonte (v0.1)
+
+| Fonte | Implementado | Como |
+|---|---|---|
+| Twitch (link de VOD/live) | Sim | Token de aplicativo (fluxo *client credentials*, sem login nem escopos). Lê título, duração, data, trechos silenciados e se o canal está ao vivo. **Não baixa o VOD**; mostra os passos do Video Producer e a retenção. |
+| Twitch (clipes públicos) | Sim | `Get Games` + `Get Clips` da categoria VALORANT, filtrados por idioma, com os mais vistos do período. |
+| YouTube Data API | Sim | `search.list` (cota própria, contada localmente) + `videos.list`; chave enviada em cabeçalho. Coleta recusada se estourar a cota diária configurada. |
+| TikTok | Não (de propósito) | Sem coleta automática. Entrada manual de observações com data e origem. |
+| Métricas das suas publicações | Manual | TikTok Display API / YouTube Analytics API ficam como evolução futura (precisam de aprovação/OAuth); a entrada manual continua sendo o caminho principal. |
+| Instagram / Reels | Não | Não avaliado. |
+
+Os campos dos clipes da Twitch (`view_count`, `language`, `duration`, `broadcaster_name`…) foram implementados a partir do que a documentação
+descreve e são lidos de forma tolerante (`get`), mas **não foram conferidos contra a resposta real da API**: se algum vier vazio, é o primeiro lugar para ajustar.
+
 ## Resumo
 
 | Fonte | O que dá para obter de forma legítima | Decisão |

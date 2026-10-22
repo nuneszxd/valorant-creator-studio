@@ -237,8 +237,9 @@ function TranscriptionForm({ data, reload }: { data: SettingsResponse; reload: (
   return (
     <div className="stack">
       <Notice tone="warn">
-        Sua placa é AMD: o faster-whisper (padrão) <strong>não usa GPU AMD no Windows</strong> e roda na CPU. Por isso o nível “Padrão” transcreve apenas
-        os trechos candidatos. A opção whisper.cpp (experimental) permite usar uma build com Vulkan, que pode aproveitar a GPU AMD.
+        Em placas AMD no Windows o faster-whisper (padrão) <strong>não usa a GPU</strong> e roda na CPU (o aplicativo não detecta a sua placa; isto é uma
+        limitação conhecida do motor). Por isso o nível “Padrão” transcreve apenas os trechos candidatos. A opção whisper.cpp (experimental) permite
+        usar uma build com Vulkan, que pode aproveitar a GPU AMD.
       </Notice>
       {caps.data && (
         <p className="small">

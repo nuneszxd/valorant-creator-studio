@@ -9,7 +9,7 @@ from pydantic import Field
 
 from ..analysis.moment_types import MOMENT_TYPES
 from ..errors import InvalidInput
-from ..models import Strict
+from ..models import Count, OptionalUrl, Strict
 from ..reports import GROUP_FIELDS, build_report
 from ..utils import utcnow
 from .deps import Ctx
@@ -23,7 +23,7 @@ STATUS_LABELS = {"planned": "planejada", "published": "publicada"}
 class PublicationBody(Strict):
     clip_id: int | None = None
     platform: PLATFORMS
-    url: str | None = Field(None, max_length=500)
+    url: OptionalUrl = None
     status: Literal["planned", "published"] = "published"
     planned_for: str | None = Field(None, max_length=40)
     published_at: str | None = Field(None, max_length=40)
@@ -31,10 +31,10 @@ class PublicationBody(Strict):
     theme: str | None = Field(None, max_length=80)
     hook: str | None = Field(None, max_length=200)
     duration_s: float | None = Field(None, ge=0, le=7200)
-    views: int | None = Field(None, ge=0)
-    likes: int | None = Field(None, ge=0)
-    comments: int | None = Field(None, ge=0)
-    shares: int | None = Field(None, ge=0)
+    views: Count | None = None
+    likes: Count | None = None
+    comments: Count | None = None
+    shares: Count | None = None
     avg_watch_s: float | None = Field(None, ge=0, le=7200)
     retention_pct: float | None = Field(None, ge=0, le=100)
     notes: str | None = Field(None, max_length=2000)
@@ -44,7 +44,7 @@ class PublicationBody(Strict):
 class PublicationPatch(Strict):
     clip_id: int | None = None
     platform: PLATFORMS | None = None
-    url: str | None = Field(None, max_length=500)
+    url: OptionalUrl = None
     status: Literal["planned", "published"] | None = None
     planned_for: str | None = Field(None, max_length=40)
     published_at: str | None = Field(None, max_length=40)
@@ -52,10 +52,10 @@ class PublicationPatch(Strict):
     theme: str | None = Field(None, max_length=80)
     hook: str | None = Field(None, max_length=200)
     duration_s: float | None = Field(None, ge=0, le=7200)
-    views: int | None = Field(None, ge=0)
-    likes: int | None = Field(None, ge=0)
-    comments: int | None = Field(None, ge=0)
-    shares: int | None = Field(None, ge=0)
+    views: Count | None = None
+    likes: Count | None = None
+    comments: Count | None = None
+    shares: Count | None = None
     avg_watch_s: float | None = Field(None, ge=0, le=7200)
     retention_pct: float | None = Field(None, ge=0, le=100)
     notes: str | None = Field(None, max_length=2000)

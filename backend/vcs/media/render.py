@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..errors import AppError, InvalidInput
+from ..errors import AppError, InvalidInput, NotFound
 from ..jobs.manager import JobCancelled
 from ..models import RenderConfig, SubtitleStyle
-from ..security import safe_filename
+from ..security import error_text, safe_filename
 from ..utils import utcnow
 from .extract import extract_wav_window
 from .progress import FfmpegProgress
@@ -142,7 +142,7 @@ def build_plan(
 
     args = [
         ffmpeg, "-nostdin", "-hide_banner", "-v", "error", "-y", "-progress", "pipe:1", "-nostats",
-        "-ss", f"{start_s:.3f}", "-t", f"{duration:.3f}", "-i", str(src),
+        "-ss", f"{start_s:.3f}", "-t", f"{duration:.3f}", "-protocol_whitelist", "file", "-i", str(src),
         "-filter_complex", graph, "-map", "[vout]",
     ]
     args += ["-map", "[aout]"] if has_audio else ["-an"]
@@ -199,13 +199,19 @@ def render_clip(ctx: Any, app: Any, clip_id: int, mode: str) -> dict[str, Any]:
         raise AppError("O arquivo da gravação original não foi encontrado (foi movido ou apagado?).",
                        code="file_missing")
     preview = mode == "preview"
-    if preview:
-        final_path = app.config.previews_dir / f"clip_{clip_id}.mp4"
-        app.config.previews_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        out_dir = app.settings.effective_output_dir()
-        base = safe_filename(f"{src.stem}_c{clip_id}_{int(clip['start_s'])}-{int(clip['end_s'])}")
-        final_path = _unique_output(out_dir, base, clip.get("output_path"))
+    try:
+        if preview:
+            app.config.previews_dir.mkdir(parents=True, exist_ok=True)
+            final_path = app.config.previews_dir / f"clip_{clip_id}.mp4"
+        else:
+            out_dir = app.settings.effective_output_dir(create=True)
+            base = safe_filename(f"{src.stem}_c{clip_id}_{int(clip['start_s'])}-{int(clip['end_s'])}")
+            final_path = _unique_output(out_dir, base, clip.get("output_path"))
+    except OSError as exc:
+        raise AppError(
+            f"Não foi possível usar a pasta de saída ({exc.strerror or exc}). Escolha outra em Configurações > Pastas.",
+            code="output_dir_unavailable",
+        ) from exc
     tmp_path = final_path.with_name(final_path.name + ".part")
 
     plan, clip, recording = plan_for_clip(app, clip_id, mode, tmp_path)
@@ -214,9 +220,12 @@ def render_clip(ctx: Any, app: Any, clip_id: int, mode: str) -> dict[str, Any]:
     if plan.notes:
         ctx.set_message(" ".join(plan.notes))
 
-    previous_status = clip["status"]
+    secrets = app.config.secrets()
     if not preview:
         app.repos.clips.update(clip_id, status="rendering", last_error=None)
+    # The in-progress file is registered so the cleanup tool can find leftovers of an interrupted render
+    # (and so it never has to guess which *.part files belong to this app).
+    app.repos.artifacts.register("temp", str(tmp_path), None, recording_id=recording["id"], clip_id=clip_id)
     progress = FfmpegProgress(ctx, plan.duration, "Renderizando prévia" if preview else "Renderizando corte")
     progress.start()
     try:
@@ -234,21 +243,33 @@ def render_clip(ctx: Any, app: Any, clip_id: int, mode: str) -> dict[str, Any]:
             raise AppError("Não foi possível salvar o arquivo: feche o vídeo se ele estiver aberto em outro programa.") from exc
     except BaseException as exc:
         tmp_path.unlink(missing_ok=True)
+        _forget_temp(app, tmp_path)
         if not preview:
-            message = exc.message if isinstance(exc, AppError) else (
-                None if isinstance(exc, JobCancelled) else f"{type(exc).__name__}: {exc}")
-            app.repos.clips.update(clip_id, status="ready" if clip.get("output_path") else "draft",
-                                   last_error=message)
+            message = None if isinstance(exc, JobCancelled) else error_text(exc, secrets)
+            try:
+                app.repos.clips.update(clip_id, status="ready" if clip.get("output_path") else "draft",
+                                       last_error=message)
+            except NotFound:
+                pass  # the clip was deleted while rendering
         raise
+    _forget_temp(app, tmp_path)
     size = final_path.stat().st_size
-    if preview:
-        app.repos.clips.update(clip_id, preview_path=str(final_path))
-        app.repos.artifacts.register("preview", str(final_path), size, recording_id=recording["id"], clip_id=clip_id)
-    else:
-        app.repos.clips.update(clip_id, status="ready", output_path=str(final_path), output_size=size,
-                               rendered_at=utcnow(), last_error=None)
-        app.repos.artifacts.register("export", str(final_path), size, recording_id=recording["id"], clip_id=clip_id)
+    try:
+        if preview:
+            app.repos.clips.update(clip_id, preview_path=str(final_path))
+        else:
+            app.repos.clips.update(clip_id, status="ready", output_path=str(final_path), output_size=size,
+                                   rendered_at=utcnow(), last_error=None)
+    except NotFound as exc:
+        final_path.unlink(missing_ok=True)
+        raise AppError("O corte foi excluído durante a renderização; o arquivo gerado foi descartado.") from exc
+    app.repos.artifacts.register("preview" if preview else "export", str(final_path), size,
+                                 recording_id=recording["id"], clip_id=clip_id)
     return {"output_path": str(final_path), "size_bytes": size, "mode": mode, "notes": plan.notes}
+
+
+def _forget_temp(app: Any, tmp_path: Path) -> None:
+    app.db.execute("DELETE FROM artifacts WHERE path = ? AND kind = 'temp'", (str(tmp_path),))
 
 
 def transcribe_clip(ctx: Any, app: Any, clip_id: int, *, allow_download: bool) -> dict[str, Any]:

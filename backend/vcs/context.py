@@ -30,10 +30,14 @@ def build_context(config: AppConfig) -> AppContext:
     db = Database(config.db_path)
     db.migrate()
     # Items left "in progress" by a crashed/closed run can never finish: reset them.
-    db.execute("UPDATE recordings SET status = 'imported' WHERE status = 'analyzing'")
     db.execute(
-        "UPDATE clips SET status = 'draft', last_error = 'Renderização interrompida.' "
-        "WHERE status = 'rendering'"
+        "UPDATE recordings SET status = CASE WHEN EXISTS ("
+        "SELECT 1 FROM analyses a WHERE a.recording_id = recordings.id AND a.status = 'done'"
+        ") THEN 'analyzed' ELSE 'imported' END WHERE status = 'analyzing'"
+    )
+    db.execute(
+        "UPDATE clips SET status = CASE WHEN output_path IS NOT NULL THEN 'ready' ELSE 'draft' END, "
+        "last_error = 'Renderização interrompida.' WHERE status = 'rendering'"
     )
     db.execute(
         "UPDATE radar_runs SET status = 'error', error = 'Coleta interrompida.' WHERE status = 'running'"

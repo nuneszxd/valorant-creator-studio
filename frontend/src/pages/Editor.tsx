@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, qs } from "../api/client";
-import type { Capabilities, Clip, ClipDetail, Cue, Facets, Job, RenderPlan } from "../api/types";
+import type { Capabilities, Clip, ClipDetail, CopyPack, Cue, Facets, Job, RenderPlan } from "../api/types";
 import { JobStatus } from "../components/JobStatus";
 import { useJobs } from "../components/JobsContext";
 import { Badge, Button, Card, Empty, ErrorBox, Loading, Notice, PageHeader, Tabs } from "../components/ui";
+import { retimeCues } from "../lib/cues";
 import { fmtBytes, fmtDate, fmtTime } from "../lib/format";
 import { useAction, useAsync } from "../lib/hooks";
 import { AudioPanel, CopyPanel, CutPanel, ExportPanel, FramingPanel, SubtitlesPanel } from "./editor/panels";
@@ -89,6 +90,9 @@ function EditorForm(props: {
   const [dirty, setDirty] = useState(false);
   const [plan, setPlan] = useState<RenderPlan | null>(null);
   const cuesTouched = useRef(false);
+  const editVersion = useRef(0);
+  const navigate = useNavigate();
+  const [copyPack, setCopyPack] = useState<CopyPack | null>(clip.copy_pack);
 
   const [d, setD] = useState<Draft>(() => ({
     title: clip.title,
@@ -104,8 +108,17 @@ function EditorForm(props: {
   }));
 
   const patch: PatchDraft = (partial) => {
+    editVersion.current += 1;
     if (partial.cues) cuesTouched.current = true;
-    setD((prev) => ({ ...prev, ...partial }));
+    setD((prev) => {
+      const next = { ...prev, ...partial };
+      // Subtitle times are relative to the cut start: keep them on the same moments of the recording.
+      if (!partial.cues && (partial.start !== undefined || partial.end !== undefined)) {
+        cuesTouched.current = true;
+        next.cues = retimeCues(prev.cues, prev.start, next.start, next.end);
+      }
+      return next;
+    });
     setDirty(true);
   };
   const setCues = (cues: Cue[]) => patch({ cues });
@@ -123,6 +136,7 @@ function EditorForm(props: {
   const rendering = activeJobs.some((j) => j.kind === "render");
 
   async function save(): Promise<boolean> {
+    const versionAtSave = editVersion.current;
     const body = {
       title: d.title,
       start_s: d.start,
@@ -137,10 +151,22 @@ function EditorForm(props: {
     };
     const updated = await run(() => api.patch<ClipDetail>(`/api/clips/${clip.id}`, body), "Corte salvo.");
     if (!updated) return false;
-    setDirty(false);
-    cuesTouched.current = false;
+    // Edits made while the request was in flight are not saved yet: keep the form marked as edited.
+    if (editVersion.current === versionAtSave) {
+      setDirty(false);
+      cuesTouched.current = false;
+    }
     reload();
     return true;
+  }
+
+  const ensureSaved = async () => (dirty ? save() : true);
+
+  async function removeClip() {
+    const note = clip.has_output ? "\n\nO arquivo MP4 já exportado continua no disco (use Biblioteca > Limpeza de arquivos para apagá-lo)." : "";
+    if (!window.confirm(`Excluir este corte da biblioteca? As edições, legendas e textos dele serão perdidos.${note}`)) return;
+    const result = await run(() => api.del(`/api/clips/${clip.id}`), "Corte excluído.");
+    if (result) navigate("/editor");
   }
 
   async function render(mode: "final" | "preview") {
@@ -166,9 +192,10 @@ function EditorForm(props: {
         title={d.title || clip.title}
         subtitle={<>
           <Link to={`/recordings/${clip.recording.id}`}>{clip.recording.name}</Link> · {fmtTime(d.start)}–{fmtTime(d.end)} ({(d.end - d.start).toFixed(1)} s)
-          {clip.candidate ? ` · pontuação ${clip.candidate.score.toFixed(0)}` : ""}
+          {clip.candidate && !clip.candidate.manual ? ` · pontuação ${clip.candidate.score.toFixed(0)}` : ""}
         </>}
         actions={<>
+          <Button variant="ghost" onClick={removeClip}>Excluir corte</Button>
           <Button onClick={save} disabled={!dirty} busy={busy}>{dirty ? "Salvar alterações" : "Salvo"}</Button>
           <Button onClick={() => render("preview")} disabled={rendering}>Prévia rápida</Button>
           <Button variant="primary" onClick={() => render("final")} disabled={rendering}>Renderizar MP4</Button>
@@ -192,9 +219,18 @@ function EditorForm(props: {
           {tab === "cut" && <CutPanel clip={clip} d={d} patch={patch} moments={moments} />}
           {tab === "framing" && <FramingPanel d={d} patch={patch} />}
           {tab === "audio" && <AudioPanel d={d} patch={patch} />}
-          {tab === "subs" && <SubtitlesPanel clip={clip} d={d} patch={patch} setCues={setCues} onReload={() => { void refresh(); reload(); }} />}
+          {tab === "subs" && (
+            <SubtitlesPanel
+              clip={clip}
+              d={d}
+              patch={patch}
+              setCues={setCues}
+              ensureSaved={ensureSaved}
+              onReload={() => { void refresh(); reload(); }}
+            />
+          )}
           {tab === "export" && <ExportPanel d={d} patch={patch} caps={caps} />}
-          {tab === "copy" && <CopyPanel clip={clip} onChanged={reload} />}
+          {tab === "copy" && <CopyPanel clip={clip} pack={copyPack} setPack={setCopyPack} ensureSaved={ensureSaved} onChanged={reload} />}
         </div>
 
         <div className="stack">
@@ -202,6 +238,11 @@ function EditorForm(props: {
             <div className="stack">
               {activeJobs.length > 0 && <div className="jobs-panel">{activeJobs.map((j) => <JobStatus key={j.id} job={j} />)}</div>}
               {clip.last_error && <Notice tone="warn">Último erro: {clip.last_error}</Notice>}
+              {clip.last_job && clip.last_job.state === "failed" && activeJobs.length === 0 && (
+                <Notice tone="warn">
+                  A última tarefa deste corte falhou ({clip.last_job.label}): {clip.last_job.error ?? "sem detalhes"}
+                </Notice>
+              )}
               {clip.has_preview && (
                 <div>
                   <strong className="small">Prévia rápida (540 de largura)</strong>

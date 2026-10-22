@@ -194,7 +194,8 @@ class FFmpegTools:
         ffprobe = self.require_ffprobe()
         try:
             proc = run_capture(
-                [ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-i", str(path)],
+                [ffprobe, "-v", "error", "-protocol_whitelist", "file", "-print_format", "json", "-show_format",
+                 "-show_streams", "-i", str(path)],
                 timeout=60,
             )
         except subprocess.TimeoutExpired as exc:

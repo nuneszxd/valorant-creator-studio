@@ -12,6 +12,7 @@ import {
 } from "../components/ui";
 import { fmtBytes, fmtDate, fmtTime } from "../lib/format";
 import { useAction, useAsync } from "../lib/hooks";
+import { LEVEL_LABEL, RECORDING_STATUS, RUN_STATUS, labelOf } from "../lib/labels";
 
 const STATUS_TONE: Record<string, "neutral" | "ok" | "info" | "danger"> = {
   imported: "neutral",
@@ -19,12 +20,7 @@ const STATUS_TONE: Record<string, "neutral" | "ok" | "info" | "danger"> = {
   analyzed: "ok",
   error: "danger",
 };
-const STATUS_LABEL: Record<string, string> = {
-  imported: "importada",
-  analyzing: "analisando",
-  analyzed: "analisada",
-  error: "com erro",
-};
+const STATUS_LABEL = RECORDING_STATUS;
 
 export function Recordings() {
   const { id } = useParams();
@@ -116,7 +112,14 @@ function RecordingView({ id }: { id: number }) {
   if (!r) return null;
 
   async function remove() {
-    if (!window.confirm("Remover esta gravação da biblioteca?\n\nO arquivo de vídeo NÃO será apagado do disco.")) return;
+    const counts = `${r.candidates_count ?? 0} candidato(s), ${r.clips_count ?? 0} corte(s)`;
+    if (
+      !window.confirm(
+        `Remover esta gravação da biblioteca?\n\nSerão removidos do aplicativo: a análise, a transcrição, ${counts} (com suas edições, legendas e textos).\n` +
+          "O arquivo de vídeo original NÃO será apagado do disco, nem os MP4 já exportados.",
+      )
+    )
+      return;
     await run(() => api.del(`/api/recordings/${id}`), "Gravação removida da biblioteca.");
     navigate("/recordings");
   }
@@ -190,7 +193,9 @@ function RecordingView({ id }: { id: number }) {
           <MetaForm key={`${r.id}-${r.map}-${r.agent}`} recording={r} onSaved={rec.reload} />
           {r.latest_analysis && (
             <div style={{ marginTop: 12 }}>
-              <strong className="small">Última análise ({r.latest_analysis.level}, {r.latest_analysis.status}):</strong>
+              <strong className="small">
+                Última análise (nível {labelOf(LEVEL_LABEL, r.latest_analysis.level)}, {labelOf(RUN_STATUS, r.latest_analysis.status)}):
+              </strong>
               {r.latest_analysis.error && <div className="notice notice-danger small">{r.latest_analysis.error}</div>}
               <DataTree value={r.latest_analysis.stats} />
               <div className="muted small">Trechos transcritos guardados: {r.transcript_segments}</div>

@@ -82,7 +82,8 @@ def extract_audio_envelope(
     progress.start()
     result = ctx.run(
         [ffmpeg, "-nostdin", "-hide_banner", "-v", "error", "-progress", "pipe:1", "-nostats",
-         "-i", str(path), "-map", f"0:a:{stream_index}", "-vn", "-af", af, "-f", "null", "-"],
+         "-protocol_whitelist", "file", "-i", str(path), "-map", f"0:a:{stream_index}", "-vn", "-af", af,
+         "-f", "null", "-"],
         on_line=progress.feed, cwd=ctx.temp_dir,
     )
     if result.returncode != 0:
@@ -119,7 +120,7 @@ def detect_scene_changes(
     progress.start()
     result = ctx.run(
         [ffmpeg, "-nostdin", "-hide_banner", "-v", "error", "-progress", "pipe:1", "-nostats",
-         "-i", str(path), "-an", "-sn", "-vf", vf, "-f", "null", "-"],
+         "-protocol_whitelist", "file", "-i", str(path), "-an", "-sn", "-vf", vf, "-f", "null", "-"],
         on_line=progress.feed, cwd=ctx.temp_dir,
     )
     if result.returncode != 0:
@@ -146,7 +147,7 @@ def extract_wav_window(
     ffmpeg = tools.require_ffmpeg()
     result = ctx.run(
         [ffmpeg, "-nostdin", "-hide_banner", "-v", "error", "-y", "-ss", f"{max(0.0, start_s):.3f}",
-         "-t", f"{duration_s:.3f}", "-i", str(path), "-map", f"0:a:{stream_index}", "-vn",
+         "-t", f"{duration_s:.3f}", "-protocol_whitelist", "file", "-i", str(path), "-map", f"0:a:{stream_index}", "-vn",
          "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(out_path)],
     )
     if result.returncode != 0 or not out_path.is_file():

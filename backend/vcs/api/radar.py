@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query
 from pydantic import Field, field_validator
 
 from ..errors import Conflict, InvalidInput
-from ..models import Strict
+from ..models import Count, OptionalUrl, Strict
 from ..radar.collect import analyze_manual, collect_twitch_clips, collect_youtube, quota_status
 from ..utils import utcnow
 from .deps import Ctx
@@ -57,14 +57,14 @@ class TwitchRunBody(Strict):
 
 class ManualBody(Strict):
     platform: Literal["tiktok", "instagram", "youtube", "twitch", "kwai", "outro"]
-    url: str | None = Field(None, max_length=500)
+    url: OptionalUrl = None
     title: str = Field(min_length=1, max_length=300)
     channel: str | None = Field(None, max_length=120)
     published_at: str | None = Field(None, max_length=40)
     duration_s: float | None = Field(None, ge=0, le=7200)
-    views: int | None = Field(None, ge=0)
-    likes: int | None = Field(None, ge=0)
-    comments: int | None = Field(None, ge=0)
+    views: Count | None = None
+    likes: Count | None = None
+    comments: Count | None = None
     hashtags: list[str] = Field(default_factory=list, max_length=30)
     format: str | None = Field(None, max_length=80)
     hook: str | None = Field(None, max_length=200)

@@ -153,10 +153,11 @@ def suggest_ideas(
                     if ratio >= 1.15:
                         priority += 0.5
                         reasons.append({
-                            "kind": "radar", "evidence": "observado",
+                            "kind": "radar", "evidence": "estimativa",
                             "text": f"Radar ({trend.get('source')}, {str(trend.get('collected_at'))[:10]}): tema "
                                     f"'{label}' com mediana de views/dia estimada em {comparison} "
-                                    f"(confiança {trend.get('confidence')}).",
+                                    f"(confiança {trend.get('confidence')}). É uma estimativa sobre uma amostra, "
+                                    "não prova de que o tema funcionará para você.",
                         })
                         break
 

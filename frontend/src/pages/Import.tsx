@@ -20,6 +20,7 @@ export function ImportPage() {
   const [linkToTwitch, setLinkToTwitch] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [imported, setImported] = useState<Recording | null>(null);
+  const [importing, setImporting] = useState(false);
 
   async function pick() {
     const result = await run(() => api.post<{ path: string | null }>("/api/system/pick-file", { kind: "video" }));
@@ -39,7 +40,9 @@ export function ImportPage() {
   }
 
   async function importFile() {
+    if (importing) return;
     setError(null);
+    setImporting(true);
     try {
       const recording = await api.post<Recording>("/api/recordings", {
         path,
@@ -53,6 +56,8 @@ export function ImportPage() {
       setImported(recording);
     } catch (err) {
       setError(err);
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -99,7 +104,7 @@ export function ImportPage() {
             </Field>
             {linkToTwitch && <Notice tone="info">Esta gravação será ligada ao VOD da Twitch informado ao lado.</Notice>}
             <div className="row">
-              <Button variant="primary" onClick={importFile} disabled={!path.trim()}>Importar</Button>
+              <Button variant="primary" onClick={importFile} busy={importing} disabled={!path.trim()}>Importar</Button>
             </div>
             <p className="muted small">
               O vídeo é lido pelo FFmpeg local só para obter duração, resolução e quadros por segundo. Formatos aceitos: mp4, mkv,

@@ -2,11 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from pathlib import Path
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .analysis.moment_types import MOMENT_TYPES, default_keywords, default_reaction_keywords
+
+
+def _http_url(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if not value.lower().startswith(("http://", "https://")) or any(ch.isspace() for ch in value):
+        raise ValueError("Use um link completo começando com http:// ou https://")
+    return value
+
+
+# Counts typed by hand (views, likes...) must fit SQLite's 64-bit integers.
+Count = Annotated[int, Field(ge=0, le=10**12)]
+OptionalUrl = Annotated[str | None, Field(max_length=500), AfterValidator(_http_url)]
 
 HEX_COLOR = r"^#[0-9A-Fa-f]{6}$"
 X264_PRESETS = Literal["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower"]
@@ -115,6 +129,27 @@ class AppSettings(Strict):
     base_hashtags: list[str] = Field(default_factory=lambda: ["valorant", "valorantbr", "valorantclips"])
     # Default YouTube quota: 100 search.list calls per day (separate bucket from the 10,000 units).
     youtube_search_daily_limit: int = Field(100, ge=1, le=10000)
+
+    @field_validator("whisper_cpp_path")
+    @classmethod
+    def _whisper_exe(cls, value: str | None) -> str | None:
+        # The path is executed. Require a plausible whisper.cpp binary name so this setting cannot be
+        # turned into "run any program" by a stray request.
+        if value in (None, ""):
+            return None
+        name = Path(value).name.lower()
+        if "whisper" not in name or Path(value).suffix.lower() not in (".exe", ""):
+            raise ValueError("O caminho precisa apontar para o whisper-cli (o nome do arquivo deve conter 'whisper').")
+        return value
+
+    @field_validator("whisper_cpp_model_path")
+    @classmethod
+    def _whisper_model(cls, value: str | None) -> str | None:
+        if value in (None, ""):
+            return None
+        if Path(value).suffix.lower() not in (".bin", ".gguf"):
+            raise ValueError("O modelo do whisper.cpp deve ser um arquivo .bin ou .gguf.")
+        return value
 
     @field_validator("keywords")
     @classmethod

@@ -108,6 +108,28 @@ def test_safe_filename():
     assert len(safe_filename("a" * 500)) == 80
 
 
+def test_network_paths_are_refused_before_touching_the_filesystem():
+    from pathlib import PureWindowsPath
+
+    from vcs.security import _reject_network_path
+
+    for value in ("\\\\srv\\share\\a.mp4", "//srv/share/a.mp4", "/\\srv\\share\\a.mp4"):
+        with pytest.raises(InvalidInput):
+            _reject_network_path(value, PureWindowsPath(value))
+    _reject_network_path("D:\\videos\\a.mp4", PureWindowsPath("D:\\videos\\a.mp4"))  # a normal drive is fine
+
+
+def test_redact_handles_json_quoted_tokens_and_error_text():
+    from vcs.errors import AppError
+    from vcs.security import error_text
+
+    out = redact('{"access_token": "abcdef123456", "other": 1} and api_key="AIzaSyXXXX1234"')
+    assert "abcdef123456" not in out and "AIzaSyXXXX1234" not in out
+    text = error_text(AppError("falha com client_secret=top-secret-value"), ["top-secret-value"])
+    assert "top-secret-value" not in text
+    assert error_text(RuntimeError("boom")).startswith("RuntimeError")
+
+
 def test_redact_masks_keys_tokens_and_known_secrets():
     text = "client_secret=abc12345 and Authorization: Bearer abcdefghijklmnop key"
     out = redact(text)

@@ -38,7 +38,9 @@ export function RangePlayer({ src, start, end, onMark, playable = true }: Props)
     const video = ref.current;
     if (!video) return;
     setNow(video.currentTime);
-    if (video.currentTime >= end) {
+    // Stop at the end of the range only while playing, so the user can still seek past it
+    // (for example to mark a later end point).
+    if (!video.paused && video.currentTime >= end) {
       video.pause();
       video.currentTime = start;
     }

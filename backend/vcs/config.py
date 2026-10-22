@@ -86,7 +86,11 @@ class AppConfig:
     youtube_api_key: str | None = field(default=None, repr=False)
     extra_origins: tuple[str, ...] = ()
     frontend_dist: Path = REPO_ROOT / "frontend" / "dist"
-    dev_ports: tuple[int, ...] = (5173,)
+    # The Vite dev server origin is only trusted when VCS_DEV=1 (otherwise any other program serving
+    # on that port could call the API).
+    dev_ports: tuple[int, ...] = ()
+    # Swagger UI loads scripts from a CDN, so it is opt-in (VCS_DEV=1 or VCS_API_DOCS=1).
+    api_docs: bool = False
 
     @property
     def db_path(self) -> Path:
@@ -169,7 +173,10 @@ class AppConfig:
         data_dir = _resolve_path(_env("VCS_DATA_DIR") or "data")
         output = _env("VCS_OUTPUT_DIR")
         extra = tuple(o.strip() for o in (_env("VCS_ALLOWED_ORIGINS") or "").split(",") if o.strip())
+        dev = _env("VCS_DEV") == "1"
         return cls(
+            dev_ports=(5173,) if dev else (),
+            api_docs=dev or _env("VCS_API_DOCS") == "1",
             host=host,
             port=port,
             data_dir=data_dir,

@@ -61,10 +61,13 @@ class SettingsStore:
             updated.output_dir = str(validate_directory(updated.output_dir, create=True))
         return self.save(updated)
 
-    def effective_output_dir(self) -> Path:
+    def effective_output_dir(self, *, create: bool = False) -> Path:
+        """Output folder in use. Reading it never touches the disk (a missing drive must not break the UI);
+        pass create=True right before writing a file."""
         settings = self.load()
         path = Path(settings.output_dir) if settings.output_dir else self.config.default_output_dir
-        path.mkdir(parents=True, exist_ok=True)
+        if create:
+            path.mkdir(parents=True, exist_ok=True)
         return path
 
     # -- creator profile ----------------------------------------------------------

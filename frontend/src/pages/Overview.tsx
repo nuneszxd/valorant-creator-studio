@@ -7,6 +7,7 @@ import { useJobs } from "../components/JobsContext";
 import { Badge, Card, Empty, ErrorBox, Loading, PageHeader, Stat } from "../components/ui";
 import { fmtBytes, fmtDate, fmtTime } from "../lib/format";
 import { useAsync } from "../lib/hooks";
+import { RECORDING_STATUS, labelOf } from "../lib/labels";
 
 export function Overview() {
   const { summary, tick } = useJobs();
@@ -24,7 +25,7 @@ export function Overview() {
     <div className="stack">
       <PageHeader
         title="Visão geral"
-        subtitle="Resumo do que existe na sua biblioteca local. Nenhum número aqui é estimado: tudo vem do banco de dados do aplicativo."
+        subtitle="Resumo do que existe na sua biblioteca local. São contagens do banco de dados do aplicativo, sem estimativas."
       />
 
       {(!data.setup.ffmpeg || !data.setup.profile_filled || !data.setup.has_recording) && (
@@ -108,7 +109,7 @@ export function Overview() {
                     </td>
                     <td className="nowrap">{fmtTime(r.duration_s)}</td>
                     <td>
-                      <Badge>{r.status}</Badge>
+                      <Badge>{labelOf(RECORDING_STATUS, r.status)}</Badge>
                     </td>
                   </tr>
                 ))}

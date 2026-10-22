@@ -285,16 +285,15 @@ class Database:
                 if version in applied:
                     continue
                 log.info("Applying database migration %s", version)
+                # The schema change and its bookkeeping row commit together, so a crash can never leave a
+                # half-recorded migration behind.
+                record = f"INSERT INTO schema_migrations (version, applied_at) VALUES ({int(version)}, '{utcnow()}');"
                 try:
-                    conn.executescript("BEGIN;\n" + script + "\nCOMMIT;")
+                    conn.executescript("BEGIN;\n" + script + "\n" + record + "\nCOMMIT;")
                 except Exception:
                     if conn.in_transaction:
                         conn.execute("ROLLBACK")
                     raise
-                conn.execute(
-                    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-                    (version, utcnow()),
-                )
         finally:
             conn.close()
 
@@ -341,5 +340,13 @@ class Database:
         try:
             cursor = conn.execute(sql, tuple(params))
             return int(cursor.lastrowid or 0)
+        finally:
+            conn.close()
+
+    def execute_count(self, sql: str, params: Sequence[Any] = ()) -> int:
+        """Run one write statement (autocommit). Returns the number of rows changed."""
+        conn = self.connect()
+        try:
+            return int(conn.execute(sql, tuple(params)).rowcount)
         finally:
             conn.close()

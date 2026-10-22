@@ -13,6 +13,7 @@ from typing import Any
 from ..errors import AppError, InvalidInput
 from ..integrations.twitch import make_twitch_client
 from ..jobs.manager import JobCancelled
+from ..security import error_text
 from ..utils import utcnow
 from .analyzer import analyze_items, theme_shares
 from .youtube import YouTubeClient, extract_hashtags, quota_day
@@ -143,8 +144,8 @@ def collect_youtube(ctx: Any, app: Any, params: dict[str, Any]) -> dict[str, Any
         app.repos.radar_runs.update(run["id"], status="cancelled", finished_at=utcnow())
         raise
     except Exception as exc:
-        message = exc.message if isinstance(exc, AppError) else f"{type(exc).__name__}: {exc}"
-        app.repos.radar_runs.update(run["id"], status="error", finished_at=utcnow(), error=message)
+        app.repos.radar_runs.update(run["id"], status="error", finished_at=utcnow(),
+                                    error=error_text(exc, app.config.secrets()))
         raise
     finally:
         client.close()
@@ -202,8 +203,8 @@ def collect_twitch_clips(ctx: Any, app: Any, params: dict[str, Any]) -> dict[str
         app.repos.radar_runs.update(run["id"], status="cancelled", finished_at=utcnow())
         raise
     except Exception as exc:
-        message = exc.message if isinstance(exc, AppError) else f"{type(exc).__name__}: {exc}"
-        app.repos.radar_runs.update(run["id"], status="error", finished_at=utcnow(), error=message)
+        app.repos.radar_runs.update(run["id"], status="error", finished_at=utcnow(),
+                                    error=error_text(exc, app.config.secrets()))
         raise
     finally:
         client.close()
@@ -231,6 +232,7 @@ def analyze_manual(app: Any) -> dict[str, Any]:
             quota={}, queries=None,
         )
     except Exception as exc:
-        app.repos.radar_runs.update(run["id"], status="error", finished_at=utcnow(), error=str(exc))
+        app.repos.radar_runs.update(run["id"], status="error", finished_at=utcnow(),
+                                    error=error_text(exc, app.config.secrets()))
         raise
     return {"run_id": run["id"], "items": len(items), "trends": trends}
