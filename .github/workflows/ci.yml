@@ -1,0 +1,49 @@
+name: CI
+
+# Runs the automated tests on GitHub's servers (not on anyone's personal or work computer).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: backend ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install FFmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install FFmpeg (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        run: choco install ffmpeg -y --no-progress
+      - name: Install backend
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e "backend[dev]"
+      - name: Show tool versions
+        shell: bash
+        run: |
+          python --version
+          ffmpeg -version | head -n 1 || echo "ffmpeg not available"
+      - name: Run backend tests
+        shell: bash
+        working-directory: backend
+        run: python -m pytest -q --tb=short 2>&1 | tee ../pytest.log
+      - name: Annotate failures
+        if: failure()
+        shell: bash
+        run: bash scripts/ci/annotate_log.sh pytest.log "pytest ${{ matrix.os }}"
