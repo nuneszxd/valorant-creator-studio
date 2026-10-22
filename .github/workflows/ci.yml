@@ -62,8 +62,10 @@ jobs:
       - name: Run setup.ps1 (same script the user runs)
         id: setup
         shell: powershell
+        # Same entry point as setup.bat (a fresh powershell -File process). cmd does the redirection so
+        # warnings that npm/pip print on stderr are plain text, exactly as in a normal console.
         run: |
-          ./scripts/setup.ps1 *> setup.log
+          cmd /c "powershell -NoProfile -ExecutionPolicy Bypass -File scripts\setup.ps1 > setup.log 2>&1"
           $code = $LASTEXITCODE
           Get-Content setup.log | Write-Host
           exit $code

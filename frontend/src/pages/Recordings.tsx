@@ -110,9 +110,9 @@ function RecordingView({ id }: { id: number }) {
   if (rec.error && !rec.data) return <ErrorBox error={rec.error} />;
   const r = rec.data;
   if (!r) return null;
+  const counts = `${r.candidates_count ?? 0} candidato(s), ${r.clips_count ?? 0} corte(s)`;
 
   async function remove() {
-    const counts = `${r.candidates_count ?? 0} candidato(s), ${r.clips_count ?? 0} corte(s)`;
     if (
       !window.confirm(
         `Remover esta gravação da biblioteca?\n\nSerão removidos do aplicativo: a análise, a transcrição, ${counts} (com suas edições, legendas e textos).\n` +
