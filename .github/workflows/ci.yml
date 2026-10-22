@@ -62,7 +62,11 @@ jobs:
       - name: Run setup.ps1 (same script the user runs)
         id: setup
         shell: powershell
-        run: ./scripts/setup.ps1 2>&1 | Tee-Object -FilePath setup.log
+        run: |
+          ./scripts/setup.ps1 *> setup.log
+          $code = $LASTEXITCODE
+          Get-Content setup.log | Write-Host
+          exit $code
       - name: Start the app, check API and UI, stop it
         id: smoke
         shell: powershell

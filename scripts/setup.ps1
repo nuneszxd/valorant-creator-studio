@@ -19,7 +19,9 @@ param(
   [switch]$SkipFrontend
 )
 
-$ErrorActionPreference = "Stop"
+# "Continue" de proposito: no Windows PowerShell 5.1, avisos que o pip/npm escrevem no stderr virariam erro
+# fatal com "Stop". O codigo de saida de cada comando nativo e verificado explicitamente abaixo.
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
 
@@ -90,7 +92,7 @@ if (-not $SkipFrontend) {
 
 $envFile = Join-Path $root ".env"
 if (-not (Test-Path -LiteralPath $envFile)) {
-  Copy-Item -LiteralPath (Join-Path $root ".env.example") -Destination $envFile
+  Copy-Item -LiteralPath (Join-Path $root ".env.example") -Destination $envFile -ErrorAction Stop
   Write-Host "Criado .env a partir de .env.example (edite para adicionar chaves da Twitch/YouTube, se quiser)."
 }
 

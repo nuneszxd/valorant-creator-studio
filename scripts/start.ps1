@@ -7,7 +7,7 @@ param(
   [int]$Port = 0
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location -LiteralPath $root
 $venvPy = Join-Path $root ".venv\Scripts\python.exe"
