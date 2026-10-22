@@ -26,7 +26,7 @@ describe("retimeCues", () => {
     const out = retimeCues(cues, 100, 100, 112); // duration 12
     expect(out).toHaveLength(2);
     expect(out[1].end).toBe(12);
-    const shorter = retimeCues(cues, 100, 100, 8);
+    const shorter = retimeCues(cues, 100, 100, 108); // new end at 108 s => duration 8 s
     expect(shorter).toHaveLength(1);
     expect(shorter[0].text).toBe("primeira");
   });
