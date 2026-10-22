@@ -48,6 +48,33 @@ jobs:
         shell: bash
         run: bash scripts/ci/annotate_log.sh pytest.log "pytest ${{ matrix.os }}"
 
+  windows-smoke:
+    name: setup and start (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run setup.ps1 (same script the user runs)
+        id: setup
+        shell: powershell
+        run: ./scripts/setup.ps1 2>&1 | Tee-Object -FilePath setup.log
+      - name: Start the app, check API and UI, stop it
+        id: smoke
+        shell: powershell
+        run: ./scripts/ci/smoke.ps1
+      - name: Annotate failures
+        if: failure()
+        shell: bash
+        run: |
+          [ "${{ steps.setup.outcome }}" = "failure" ] && bash scripts/ci/annotate_log.sh setup.log "setup ps1"
+          [ "${{ steps.smoke.outcome }}" = "failure" ] && bash scripts/ci/annotate_log.sh smoke.log "smoke"
+          exit 0
+
   frontend:
     name: frontend
     runs-on: ubuntu-latest

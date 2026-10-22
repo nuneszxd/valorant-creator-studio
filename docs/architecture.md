@@ -1,109 +1,102 @@
 # Arquitetura
 
-Documento de decisões da etapa 0. Ele descreve o que está **proposto**; nada abaixo foi implementado ou testado ainda. As decisões podem mudar conforme os resultados das validações no computador pessoal.
+Descreve o que está **implementado** (versão 0.1). Itens que dependem de hardware ou de gravações reais estão marcados como não validados.
 
 ## Visão geral
 
 ```
- Navegador (localhost)                Máquina do usuário
-┌────────────────────┐   HTTP/JSON   ┌───────────────────────────────┐
-│ React + TypeScript │ ────────────► │ FastAPI (127.0.0.1)           │
-│ (dashboard)        │ ◄──────────── │  ├─ API REST documentada      │
-└────────────────────┘  OpenAPI      │  │   (OpenAPI/Swagger)        │
-                                     │  ├─ Fila de tarefas (em       │
-                                     │  │   processo, persistida)    │
-                                     │  ├─ Serviços de domínio       │
-                                     │  └─ SQLite (metadados)        │
-                                     │            │                  │
-                                     │   subprocess (lista de args)  │
-                                     │            ▼                  │
-                                     │   FFmpeg / ffprobe            │
-                                     │   faster-whisper (opcional)   │
-                                     └───────────────────────────────┘
-                                       Pasta de trabalho / saída
-                                       (vídeos ficam no disco, não no banco)
+ Navegador (localhost)                    Seu computador
+┌────────────────────────┐   HTTP/JSON    ┌───────────────────────────────────────────┐
+│ React + TypeScript     │ ─────────────► │ FastAPI em 127.0.0.1                      │
+│ (Vite; em produção é   │ ◄───────────── │  ├─ Guarda Host/Origin (anti-rebinding/   │
+│ servido pelo backend)  │   OpenAPI      │  │   CSRF)                                │
+└────────────────────────┘                │  ├─ Rotas REST (docs em /api/docs)        │
+                                          │  ├─ Fila de tarefas (1 por vez, SQLite)   │
+                                          │  ├─ Análise / renderização / radar        │
+                                          │  └─ SQLite (metadados e caminhos)         │
+                                          │            │ subprocess (lista de args)   │
+                                          │            ▼                              │
+                                          │  FFmpeg / ffprobe   faster-whisper (CPU)  │
+                                          └───────────────────────────────────────────┘
+                                            Vídeos ficam em disco; o banco só guarda caminhos
 ```
 
 ## Decisões
 
-| Tema | Decisão proposta | Justificativa |
+| Tema | Decisão | Justificativa |
 |---|---|---|
-| Backend | Python 3.11+ com FastAPI | Ecossistema de áudio/ML local; OpenAPI gerado automaticamente para a API documentada. |
-| Frontend | React + TypeScript + Vite | Pedido do projeto; tipagem do contrato com a API. |
-| Banco | SQLite | Uso local, sem serviço adicional. Guarda metadados, caminhos, histórico e métricas, nunca os vídeos. |
-| Tarefas longas | Fila em processo, com estado persistido no SQLite | Evita Celery/Redis/Docker. Estados: aguardando, em andamento, concluída, cancelada, com erro. |
-| Vídeo | FFmpeg e ffprobe, instalados pelo usuário | Padrão da área; sem dependência Python pesada para renderização. |
-| Transcrição | faster-whisper, extra **opcional** | Roda localmente; modelos de tamanhos diferentes permitem ajustar à máquina. |
-| Cenas | Filtro de cena do FFmpeg primeiro | PySceneDetect só entrará se o filtro se mostrar insuficiente, para evitar uma dependência a mais. |
-| Textos (ganchos, títulos, hashtags) | Regras locais | Gratuito e sem enviar conteúdo para fora. IA externa só como opção explícita, com custos informados e aprovação. |
-| Distribuição | Duas portas locais em desenvolvimento (API + Vite); na versão final, a API pode servir o frontend compilado | Simples de iniciar e de encerrar. |
+| Backend | Python 3.11+ e FastAPI | Ecossistema de áudio/ML local; OpenAPI automático para a API documentada. |
+| Frontend | React + TypeScript + Vite, sem biblioteca de UI | Poucas dependências; tipagem do contrato com a API. |
+| Banco | SQLite com `sqlite3` da biblioteca padrão e migrações numeradas | Uso local; sem ORM para reduzir dependências. Guarda metadados e caminhos, nunca vídeos. |
+| Tarefas | Fila em processo com um trabalhador, estado em SQLite | Sem Celery/Redis/Docker. Estados: aguardando, em andamento, concluída, cancelada, com erro. |
+| Vídeo | FFmpeg/ffprobe externos | Padrão da área; sem dependência Python pesada. |
+| Áudio | Envelope de volume via filtros `astats`/`ametadata` do FFmpeg | Sem NumPy; progresso real pelo `-progress`. |
+| Cenas | Filtro `select='gt(scene,…)'` do FFmpeg | Sem PySceneDetect (dependência a menos). |
+| Transcrição | faster-whisper (opcional, CPU) ou whisper.cpp (experimental) | CTranslate2 não tem backend AMD no Windows; só trechos candidatos são transcritos por padrão. |
+| Textos | Regras locais | Gratuito, sem enviar conteúdo para fora; só usa fatos conhecidos. |
+| Distribuição | Uma porta: o backend serve a interface compilada | Simples de iniciar e encerrar. Em desenvolvimento, Vite faz proxy de `/api`. |
 
-Alternativas consideradas e descartadas por enquanto:
-
-- **Electron/Tauri:** empacotamento desktop agora seria complexidade sem necessidade comprovada.
-- **Celery + Redis:** exige serviço persistente; a fila em processo cobre o uso de um único usuário.
-- **Docker:** não é necessário para uso local e exigiria aprovação.
-- **Modelos de visão para detectar abates/HUD:** possível no futuro, mas pesado e sem validação; fora do escopo inicial.
+Descartados por ora: Electron/Tauri (complexidade sem necessidade), Celery/Redis e Docker (serviço persistente), modelos de visão para ler
+o kill feed (pesado e sem validação).
 
 ## Sistema de tarefas
 
-- Cada tarefa tem tipo, estado, mensagem de erro útil e, **somente quando há informação real**, progresso.
-- Fontes reais de progresso previstas: `-progress` do FFmpeg (tempo processado / duração conhecida pelo ffprobe) e segmentos transcritos / duração do áudio. Sem isso, a interface mostra apenas o estado, sem percentual.
-- Cancelamento: sinal ao subprocesso, seguido de limpeza dos temporários **criados pela própria tarefa**. Nunca apaga arquivos originais.
-- Tarefas pesadas só começam por ação explícita do usuário.
+- Cada tarefa tem tipo, estado, mensagem de erro útil e **progresso só quando há informação real**: `-progress` do FFmpeg (tempo processado ÷ duração
+  conhecida) ou janelas transcritas ÷ janelas totais. Sem isso o campo fica `NULL` e a interface mostra uma barra indeterminada, sem percentual.
+- Cancelamento: sinaliza o subprocesso, o job lança `JobCancelled`, e a pasta temporária da tarefa é removida **antes** de publicar o estado final.
+- Tarefas interrompidas por um fechamento do app são marcadas como com erro na próxima inicialização (nunca “retomadas” de forma fingida).
+- Tarefas pesadas só começam por ação explícita (análise, renderização, coletas do radar).
 
-## Pipeline de análise (planejado)
+## Pipeline de análise
 
-1. `ffprobe`: duração, resolução, taxa de quadros, streams.
-2. Extração de áudio mono em pasta temporária da pasta de trabalho.
-3. Envelope de volume ao longo do tempo (picos e mudanças).
-4. Mudanças de cena (filtro do FFmpeg).
-5. Transcrição com timestamps (opcional, escolha do nível de processamento).
-6. Fusão dos sinais em janelas candidatas.
-7. Pontuação explicável.
+1. `ffprobe` na importação: duração, resolução, fps, codecs, faixas de áudio.
+2. Envelope de volume (RMS por janela de 0,5 s) → normalização pela mediana/p95 **da própria gravação**.
+3. Opcional: mudanças de cena (2 fps, 320 px).
+4. Picos → janelas candidatas (antes/depois do pico configuráveis, distância mínima entre picos).
+5. Opcional: transcrição **só das janelas** (nível Padrão/Detalhado) ou de tudo em blocos de 5 min (Completo).
+6. Pontuação explicável por critérios (pesos configuráveis); sobreposições são suprimidas; candidatos já revisados são preservados.
 
-Todos os sinais guardam o timestamp na gravação original para localizar o trecho.
+Níveis: **Leve** (áudio), **Padrão** (+ transcrição dos candidatos, modelo base), **Detalhado** (+ cenas, modelo small), **Completo** (transcreve tudo).
 
 ### Limitações assumidas
 
-- Pico de áudio **não** significa jogada importante: é um sinal para investigar, combinado com fala e mudança de cena.
-- Não é possível identificar com precisão todos os eventos do Valorant (clutches, aces, abates) só por áudio ou imagem. A revisão e a correção manual são parte do fluxo.
-- A pontuação é uma soma ponderada de critérios exibidos ao usuário (intensidade de áudio, presença de fala, mudança de cena, clareza de contexto, adequação à duração desejada, preferências do criador). Os pesos são configuráveis. Não é probabilidade de viralização.
-- O feedback do usuário (aprovar, rejeitar, marcar bom ou ruim) ajusta recomendações futuras de forma transparente.
+- Pico de áudio **não** significa jogada importante: é uma pista, combinada com fala e cenas.
+- Não identifica aces/clutches pela imagem nem lê o kill feed. O tipo do momento é um palpite por palavras na fala; o usuário confirma.
+- A pontuação é uma soma ponderada de sinais exibidos ao usuário; não é probabilidade de viralização. A confiança mede a **concordância entre sinais**.
+- O feedback (aprovar/rejeitar/resultado) ajusta no máximo ±10 pontos por tipo de momento.
 
-### Níveis de processamento (planejado)
+## Renderização vertical
 
-O usuário escolhe o nível antes de iniciar, com aviso prévio de disco, memória, tempo e download de modelo:
+Layouts: **blur** (gameplay inteiro sobre fundo desfocado — padrão, não corta o HUD), **solid** (cor sólida) e **fill** (preenche e corta as laterais, com foco ajustável).
+Recorte manual opcional. Nunca há zoom automático. Parâmetros validados (resolução par, CRF, preset, bitrate, fps, volume, loudnorm, fade).
+Encoders: `libx264` (padrão), `h264_amf` (AMD), `h264_nvenc`, `h264_qsv`; só os listados pelo FFmpeg local são aceitos. Legendas em ASS (filtro `ass`),
+com destaque da palavra falada. A saída é gravada em `.part` e renomeada ao final; falha ou cancelamento removem o `.part`.
 
-- **Leve:** só áudio e cenas, sem transcrição.
-- **Padrão:** transcrição com modelo pequeno.
-- **Detalhado:** modelo maior; mais lento e com mais memória e disco.
+## Radar de tendências
 
-Tamanhos de modelos e requisitos reais serão confirmados na etapa 4 antes de serem documentados como fato.
+Coletores oficiais (YouTube Data API com a chave no cabeçalho, Twitch Helix com credenciais do app) → itens com fonte/data → `analyzer` puro que gera
+tendências separando **observado / estimado / hipótese**. Confiança por tamanho de amostra, nunca acima de “média”. Cada coleta é um registro datado;
+a comparação com a coleta anterior só é feita com a mesma consulta e amostra mínima.
 
-## Renderização vertical (planejado)
-
-Gameplay de Valorant é horizontal e o HUD (minimapa, feed de abates, vida e habilidades) ocupa as bordas, então recortar de forma agressiva perde informação. Opções previstas:
-
-1. **Gameplay inteiro com fundo desfocado** (padrão; não corta nada).
-2. **Gameplay inteiro com fundo sólido.**
-3. **Reenquadramento manual**, com região escolhida pelo usuário e zoom opcional. Nunca é automático.
-
-Resolução, duração, CRF/qualidade, preset de velocidade, estilo e posição de legenda e ajuste de áudio serão parâmetros configuráveis, com explicação do efeito em qualidade, tamanho e velocidade. A saída é MP4, e a renderização só ocorre sob solicitação.
-
-## Estrutura de diretórios prevista
+## Estrutura de diretórios
 
 ```
-valorant-creator-studio/
-├─ backend/            # FastAPI, serviços, fila, acesso ao SQLite, testes (etapa 1)
-├─ frontend/           # React + TypeScript (etapa 2)
-├─ docs/               # decisões, segurança, fontes de dados
-├─ .env.example
-└─ data/               # criada em tempo de execução; ignorada pelo Git
+backend/vcs/
+  main.py config.py security.py db.py repos.py models.py     # base
+  jobs/        fila e execução de subprocessos
+  media/       ffmpeg, extração de sinais, transcrição, legendas, render
+  analysis/    sinais, pontuação, pipeline
+  radar/       YouTube, coletas, analisador
+  integrations/twitch.py   copywriting/   recommendations.py   reports.py
+  api/         rotas (system, settings, jobs, recordings, imports, analysis,
+               candidates, clips, publications, ideas, radar, library)
+frontend/src/  pages/ components/ api/ lib/
+scripts/       setup / start / stop / doctor (PowerShell) e CI
 ```
 
 ## Testes
 
-- Backend: pytest, com fixtures de mídia **sintéticas** geradas em tempo de teste (FFmpeg/lavfi). Nenhum vídeo real é versionado.
-- Frontend: Vitest e Testing Library.
-- Os testes que exigem instalação, FFmpeg ou processamento são escritos aqui e executados no computador pessoal do autor. Cada entrega informa claramente o que foi escrito, o que foi revisado estaticamente e o que foi realmente executado.
+- Backend (pytest): funções puras, API, e ponta a ponta com FFmpeg real em vídeos sintéticos gerados no teste (análise, cenas, render nos três layouts, streaming com Range).
+- Frontend (Vitest): formatação, cliente da API, componentes de tarefa/progresso; checagem de tipos e build de produção.
+- CI (GitHub Actions): pytest no Linux e no Windows, frontend, e um teste que executa `setup.ps1`, inicia o app, confere API/interface e o encerra.
+- **Não coberto**: gravações reais do Valorant, GPU AMD (`h264_amf`), transcrição com modelos reais, chamadas reais às APIs (usam transporte simulado nos testes).
