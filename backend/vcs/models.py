@@ -113,6 +113,8 @@ class AppSettings(Strict):
     render: RenderConfig = Field(default_factory=RenderConfig)
     subtitle_style: SubtitleStyle = Field(default_factory=SubtitleStyle)
     base_hashtags: list[str] = Field(default_factory=lambda: ["valorant", "valorantbr", "valorantclips"])
+    # Default YouTube quota: 100 search.list calls per day (separate bucket from the 10,000 units).
+    youtube_search_daily_limit: int = Field(100, ge=1, le=10000)
 
     @field_validator("keywords")
     @classmethod

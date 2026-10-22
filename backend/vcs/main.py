@@ -12,7 +12,16 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .api import analysis as analysis_api
+from .api import candidates as candidates_api
+from .api import clips as clips_api
+from .api import ideas as ideas_api
+from .api import imports as imports_api
 from .api import jobs as jobs_api
+from .api import library as library_api
+from .api import publications as publications_api
+from .api import radar as radar_api
+from .api import recordings as recordings_api
 from .api import settings as settings_api
 from .api import system as system_api
 from .config import AppConfig
@@ -124,4 +133,17 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     return app
 
 
-ROUTER_MODULES = [system_api, settings_api, jobs_api]
+ROUTER_MODULES = [
+    system_api,
+    settings_api,
+    jobs_api,
+    recordings_api,
+    imports_api,
+    analysis_api,
+    candidates_api,
+    clips_api,
+    publications_api,
+    ideas_api,
+    radar_api,
+    library_api,
+]

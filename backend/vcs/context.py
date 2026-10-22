@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from .config import AppConfig
 from .db import Database
@@ -20,6 +21,8 @@ class AppContext:
     settings: SettingsStore
     jobs: JobManager
     tools: FFmpegTools
+    # Lets tests inject an httpx.MockTransport so integrations never touch the network in tests.
+    http_transport: Any = None
 
 
 def build_context(config: AppConfig) -> AppContext:

@@ -213,21 +213,23 @@ class JobManager:
             self._contexts[job_id] = ctx
         self.repo.update(job_id, state="running", started_at=utcnow())
         secrets = self.config.secrets()
+        outcome: dict[str, Any]
         try:
             result = func(ctx)
-            self.repo.update(
-                job_id, state="succeeded", finished_at=utcnow(),
-                result=result if isinstance(result, (dict, list)) else None,
-            )
+            outcome = {"state": "succeeded", "result": result if isinstance(result, (dict, list)) else None}
         except JobCancelled:
-            self.repo.update(job_id, state="cancelled", finished_at=utcnow())
+            outcome = {"state": "cancelled"}
         except AppError as exc:
-            self.repo.update(job_id, state="failed", finished_at=utcnow(), error=redact(exc.message, secrets))
+            outcome = {"state": "failed", "error": redact(exc.message, secrets)}
         except Exception as exc:
             log.exception("Job %s failed", job_id)
-            message = redact(f"Erro inesperado ({type(exc).__name__}): {exc}", secrets)
-            self.repo.update(job_id, state="failed", finished_at=utcnow(), error=message)
-        finally:
-            ctx.cleanup()
-            with self._lock:
-                self._contexts.pop(job_id, None)
+            outcome = {
+                "state": "failed",
+                "error": redact(f"Erro inesperado ({type(exc).__name__}): {exc}", secrets),
+            }
+        # Clean up before publishing the final state so observers never see a finished job
+        # that still has temporary files lying around.
+        ctx.cleanup()
+        with self._lock:
+            self._contexts.pop(job_id, None)
+        self.repo.update(job_id, finished_at=utcnow(), **outcome)

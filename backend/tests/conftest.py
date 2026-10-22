@@ -38,6 +38,18 @@ def ctx(client):
     return client.app.state.ctx
 
 
+@pytest.fixture
+def recording(ctx, tmp_path):
+    """A recording row pointing at a dummy file (no ffmpeg needed). Never a real video."""
+    path = tmp_path / "live_fixture.mp4"
+    path.write_bytes(b"\x00" * 16)
+    return ctx.repos.recordings.insert(
+        name=path.name, path=str(path), imported_at="2026-01-01T00:00:00+00:00", duration_s=120.0,
+        width=1920, height=1080, fps=60.0, video_codec="h264", audio_codec="aac", audio_streams=1,
+        size_bytes=16, map="Ascent", agent="Jett",
+    )
+
+
 def wait_for(predicate, timeout: float = 15.0, interval: float = 0.05):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
