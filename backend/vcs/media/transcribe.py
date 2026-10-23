@@ -22,6 +22,8 @@ from ..models import AppSettings
 
 log = logging.getLogger(__name__)
 
+WHISPER_SAMPLE_RATE = 16000
+
 MODEL_INFO = {
     "tiny": {"approx_download": "≈75 MB", "note": "mais rápido, menos preciso"},
     "base": {"approx_download": "≈145 MB", "note": "bom ponto de partida em CPU"},
@@ -71,6 +73,33 @@ def interpolate_words(text: str, start: float, end: float) -> list[Word]:
     return [Word(start + i * step, start + (i + 1) * step, tok) for i, tok in enumerate(tokens)]
 
 
+def load_wav_samples(wav: Path) -> Any:
+    """Read the 16 kHz mono 16-bit WAV written by `extract_wav_window` as float32 samples in [-1, 1].
+
+    faster-whisper decodes a file path with PyAV, and some PyAV/faster-whisper version pairs disagree
+    on `av.open` arguments ("open() got an unexpected keyword argument 'metadata_errors'"). We
+    control the WAV format, so the model gets the samples directly and PyAV is never involved.
+    """
+    import wave
+
+    import numpy as np  # installed together with faster-whisper
+
+    try:
+        with wave.open(str(wav), "rb") as reader:
+            channels, width, rate = reader.getnchannels(), reader.getsampwidth(), reader.getframerate()
+            raw = reader.readframes(reader.getnframes())
+    except (wave.Error, EOFError, OSError) as exc:
+        raise AppError(f"O áudio extraído para a transcrição não pôde ser lido: {exc}") from exc
+    if (channels, width, rate) != (1, 2, WHISPER_SAMPLE_RATE):
+        raise AppError(
+            f"O áudio extraído para a transcrição tem formato inesperado ({channels} canal(is), "
+            f"{width * 8} bits, {rate} Hz); era esperado mono, 16 bits, {WHISPER_SAMPLE_RATE} Hz."
+        )
+    if not raw:
+        return np.zeros(0, dtype=np.float32)
+    return np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+
+
 class FasterWhisperTranscriber:
     name = "faster-whisper"
 
@@ -113,8 +142,11 @@ class FasterWhisperTranscriber:
 
     def transcribe_file(self, wav: Path, *, offset_s: float, ctx: Any) -> list[Segment]:
         model = self._load()
+        audio = load_wav_samples(wav)
+        if audio.size == 0:
+            return []
         segments_iter, _info = model.transcribe(
-            str(wav), language=self.language, word_timestamps=True, vad_filter=True,
+            audio, language=self.language, word_timestamps=True, vad_filter=True,
             beam_size=self.beam_size, condition_on_previous_text=False,
         )
         out: list[Segment] = []

@@ -217,6 +217,19 @@ class RedactingFormatter(logging.Formatter):
         return redact(super().format(record), self._secrets)
 
 
+class ClientDisconnectFilter(logging.Filter):
+    """Drop the traceback asyncio prints on Windows when the browser abandons a connection.
+
+    Cancelling a video range request (seeking, changing page) resets the socket; the server keeps
+    working, so this is noise that looks like a failure in the console.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.name != "asyncio" or not record.exc_info:
+            return True
+        return not isinstance(record.exc_info[1], (ConnectionResetError, ConnectionAbortedError))
+
+
 def setup_logging(logs_dir: Path | None, secrets: Iterable[str] = (), level: int = logging.INFO) -> None:
     root = logging.getLogger()
     if getattr(root, "_vcs_configured", False):
@@ -225,6 +238,7 @@ def setup_logging(logs_dir: Path | None, secrets: Iterable[str] = (), level: int
     handlers: list[logging.Handler] = []
     stream = logging.StreamHandler()
     stream.setFormatter(formatter)
+    stream.addFilter(ClientDisconnectFilter())
     handlers.append(stream)
     if logs_dir is not None:
         try:
@@ -233,6 +247,7 @@ def setup_logging(logs_dir: Path | None, secrets: Iterable[str] = (), level: int
                 logs_dir / "app.log", maxBytes=2_000_000, backupCount=3, encoding="utf-8"
             )
             file_handler.setFormatter(formatter)
+            file_handler.addFilter(ClientDisconnectFilter())
             handlers.append(file_handler)
         except OSError:
             pass

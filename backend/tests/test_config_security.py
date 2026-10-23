@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from vcs.config import AppConfig, ConfigError, parse_env_file
 from vcs.errors import Forbidden, InvalidInput, NotFound
 from vcs.security import (
+    ClientDisconnectFilter,
     ensure_within,
     host_without_port,
     redact,
@@ -128,6 +131,20 @@ def test_redact_handles_json_quoted_tokens_and_error_text():
     text = error_text(AppError("falha com client_secret=top-secret-value"), ["top-secret-value"])
     assert "top-secret-value" not in text
     assert error_text(RuntimeError("boom")).startswith("RuntimeError")
+
+
+def _log_record(name: str, exc: BaseException | None) -> logging.LogRecord:
+    exc_info = (type(exc), exc, None) if exc else None
+    return logging.LogRecord(name, logging.ERROR, __file__, 1, "boom", None, exc_info)
+
+
+def test_client_disconnect_filter_drops_only_asyncio_connection_resets():
+    keep = ClientDisconnectFilter().filter
+    assert not keep(_log_record("asyncio", ConnectionResetError(10054, "reset")))
+    assert not keep(_log_record("asyncio", ConnectionAbortedError()))
+    assert keep(_log_record("asyncio", RuntimeError("other asyncio problem")))
+    assert keep(_log_record("asyncio", None))
+    assert keep(_log_record("vcs.jobs", ConnectionResetError()))
 
 
 def test_redact_masks_keys_tokens_and_known_secrets():

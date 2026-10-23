@@ -19,7 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 # Local speech-to-text (CPU on AMD GPUs; downloads a model on first use, only with explicit consent).
 transcribe = ["faster-whisper>=1.0"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "numpy>=1.26"]  # numpy: tests of the transcriber's audio hand-off
 
 [project.scripts]
 vcs = "vcs.__main__:main"
