@@ -180,16 +180,28 @@ def test_render_preview_and_final_with_all_layouts(client, tmp_path):
     assert {"export", "preview"} <= kinds
 
 
-def frame_md5(ffmpeg: str, video: str, at: float) -> str:
-    """MD5 of the decoded frame at `at` seconds - changes when anything is drawn on the picture."""
+YMAX_FILTER = "crop=360:100:0:440,signalstats,metadata=mode=print:key=lavfi.signalstats.YMAX:file=-"
+
+
+def parse_ymax(stdout: str) -> int:
+    import re
+
+    match = re.search(r"YMAX=(\d+)", stdout)
+    return int(match.group(1)) if match else -1
+
+
+def bottom_ymax(ffmpeg: str, video: str, at: float = 1.5) -> int:
+    """Brightest luma value (0-255) in the lower part of the 360x640 frame at `at` seconds.
+
+    With the 'solid' layout the lower part is plain dark padding, so a white subtitle shows up as ~235."""
     import subprocess
 
-    out = subprocess.run(
-        [ffmpeg, "-nostdin", "-v", "error", "-ss", str(at), "-i", str(video), "-frames:v", "1", "-f", "framemd5", "-"],
-        capture_output=True, text=True, check=True, timeout=60,
-    ).stdout
-    rows = [line for line in out.splitlines() if line and not line.startswith("#")]
-    return rows[-1].split(",")[-1].strip()
+    proc = subprocess.run(
+        [ffmpeg, "-nostdin", "-v", "error", "-ss", str(at), "-i", str(video), "-frames:v", "1",
+         "-vf", YMAX_FILTER, "-f", "null", "-"],
+        capture_output=True, text=True, timeout=60,
+    )
+    return parse_ymax(proc.stdout)
 
 
 def test_subtitles_are_really_burned_into_the_rendered_video(client, tmp_path):
@@ -206,55 +218,57 @@ def test_subtitles_are_really_burned_into_the_rendered_video(client, tmp_path):
     saved = client.patch(url, json={"subtitles": cues, "render_config": {**base, "subtitles": False}})
     assert saved.status_code == 200, saved.text
 
-    def render_and_hash():
+    def render_and_measure():
         job = finish(client, client.post(f"{url}/render", json={"mode": "final"}).json())
         assert job["state"] == "succeeded", job["error"]
         path = client.get(url).json()["output_path"]
-        return job, frame_md5(tools.ffmpeg, path, 1.5)
+        return job, bottom_ymax(tools.ffmpeg, path)
 
-    _, plain_a = render_and_hash()
-    _, plain_b = render_and_hash()
-    assert plain_a == plain_b, "encoding must be deterministic for this comparison to mean anything"
+    _, plain = render_and_measure()
+    assert 0 <= plain < 80, f"the subtitle-free render should have a dark lower area (luma max {plain})"
 
     client.patch(url, json={"render_config": {"subtitles": True}})
     plan = client.get(f"{url}/render-plan").json()
     assert plan["subtitles_applied"] is True and "ass=filename=subs.ass" in plan["filter_graph"]
-    job, with_subtitles = render_and_hash()
+    job, with_subtitles = render_and_measure()
     assert "Legendas não aplicadas" not in (job["message"] or "")
-    if with_subtitles == plain_a:
+    if with_subtitles < 150:
         pytest.fail(
-            "the subtitle text was not drawn on the video\n"
-            f"job message={job['message']!r}\nresult={job['result']!r}\n"
-            + diagnose_missing_subtitles(tools, plan, tmp_path, plain_a)
+            f"the subtitle text was not drawn on the video (lower-area luma max {with_subtitles}, plain {plain})\n"
+            f"job message={job['message']!r}\n" + diagnose_missing_subtitles(tools, plan, tmp_path)
         )
 
 
-def diagnose_missing_subtitles(tools, plan, tmp_path, plain_md5) -> str:
+def diagnose_missing_subtitles(tools, plan, tmp_path) -> str:
     """Re-run pieces of the render outside the app to find which layer loses the subtitles."""
     import subprocess
 
     script = plan["ass"] or ""
     (tmp_path / "subs.ass").write_text(script, encoding="utf-8")
 
-    def run(args):
-        proc = subprocess.run(args, capture_output=True, text=True, cwd=str(tmp_path), timeout=120)
-        rows = [line for line in proc.stdout.splitlines() if line and not line.startswith("#")]
-        digest = rows[-1].split(",")[-1].strip() if rows and "," in rows[-1] else ""
-        return digest, proc.stderr[-800:]
-
-    black = [tools.ffmpeg, "-nostdin", "-hide_banner", "-v", "warning", "-f", "lavfi", "-i", "color=c=black:s=360x640:r=10:d=3"]
-    tail = ["-ss", "1.5", "-frames:v", "1", "-f", "framemd5", "-"]
-    blank, _ = run(black + tail)
-    drawn_a, err_a = run(black + ["-vf", "ass=filename=subs.ass"] + tail)
-
+    # [A] the app's ASS script alone on a black frame
+    proc_a = subprocess.run(
+        [tools.ffmpeg, "-nostdin", "-hide_banner", "-v", "warning", "-f", "lavfi", "-i",
+         "color=c=black:s=360x640:r=10:d=3", "-vf", "ass=filename=subs.ass," + YMAX_FILTER,
+         "-ss", "1.5", "-frames:v", "1", "-f", "null", "-"],
+        capture_output=True, text=True, cwd=str(tmp_path), timeout=120,
+    )
+    # [B] the app's exact command, run directly; [C] the same command with the ass filter removed
     command = list(plan["command"])
     command[-1] = str(tmp_path / "direct.mp4")
-    proc = subprocess.run(command, capture_output=True, text=True, cwd=str(tmp_path), timeout=120)
-    direct, _ = run([tools.ffmpeg, "-nostdin", "-v", "error", "-ss", "1.5", "-i", str(tmp_path / "direct.mp4"),
-                     "-frames:v", "1", "-f", "framemd5", "-"])
+    proc_b = subprocess.run(command, capture_output=True, text=True, cwd=str(tmp_path), timeout=120)
+    sweep = {t: bottom_ymax(tools.ffmpeg, str(tmp_path / "direct.mp4"), t) for t in (0.3, 0.8, 1.5, 2.5, 3.5, 4.5, 5.4)}
+    graph_at = command.index("-filter_complex") + 1
+    command_c = list(command)
+    command_c[graph_at] = command[graph_at].replace(";[vbase]ass=filename=subs.ass[vout]", ";[vbase]null[vout]")
+    command_c[-1] = str(tmp_path / "direct_nosub.mp4")
+    proc_c = subprocess.run(command_c, capture_output=True, text=True, cwd=str(tmp_path), timeout=120)
+    nosub = bottom_ymax(tools.ffmpeg, str(tmp_path / "direct_nosub.mp4"), 1.5)
     return (
-        f"[A] app's ASS script alone on a black frame at 1.5s: drawn={drawn_a != blank} stderr={err_a!r}\n"
-        f"[B] app's exact command run directly: rc={proc.returncode} drawn={direct != plain_md5} stderr={proc.stderr[-600:]!r}\n"
+        f"[A] ASS alone on a black frame @1.5s: luma max {parse_ymax(proc_a.stdout)} stderr={proc_a.stderr[-400:]!r}\n"
+        f"[B] app command run directly rc={proc_b.returncode}; luma max by time {sweep}; stderr={proc_b.stderr[-500:]!r}\n"
+        f"[C] same command without the ass filter rc={proc_c.returncode}: luma max @1.5s {nosub}\n"
+        f"graph: {command[graph_at]}\n"
         f"ASS script head:\n{chr(10).join(script.splitlines()[:16])}"
     )
 
