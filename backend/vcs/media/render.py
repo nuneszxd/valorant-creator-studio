@@ -135,7 +135,7 @@ def build_plan(
         if ass_filter_available:
             ass_text = build_ass(cues, style, out_w, out_h)
         else:
-            notes.append("Legendas não aplicadas: esta build do FFmpeg não tem o filtro 'ass' (use uma build 'full').")
+            notes.append("Legendas não aplicadas: esta build do FFmpeg não tem o filtro 'ass' (use uma build com libass, como a 'essentials' ou a 'full' da gyan.dev).")
     graph += ";[vbase]ass=filename=subs.ass[vout]" if ass_text else ";[vbase]null[vout]"
     if has_audio:
         graph += ";" + audio_graph(cfg, audio_stream_index, duration)
@@ -209,7 +209,7 @@ def render_clip(ctx: Any, app: Any, clip_id: int, mode: str) -> dict[str, Any]:
             final_path = _unique_output(out_dir, base, clip.get("output_path"))
     except OSError as exc:
         raise AppError(
-            f"Não foi possível usar a pasta de saída ({exc.strerror or exc}). Escolha outra em Configurações > Pastas.",
+            f"Não foi possível usar a pasta de saída ({exc.strerror or exc}). Escolha outra em Configurações > Pastas e integrações.",
             code="output_dir_unavailable",
         ) from exc
     tmp_path = final_path.with_name(final_path.name + ".part")

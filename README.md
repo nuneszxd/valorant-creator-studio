@@ -11,9 +11,9 @@ criação de conteúdo com base em dados reais e resultados mensuráveis. Backen
 
 ## Começar (Windows)
 
-1. Instale **Python 3.12**, **Node.js LTS** e **FFmpeg (build full)** — detalhes em [docs/USAGE.md](docs/USAGE.md).
+1. Instale **Python 3.12**, **Node.js LTS** e **FFmpeg (build essentials ou full da gyan.dev)** — detalhes em [docs/USAGE.md](docs/USAGE.md).
 2. `git clone https://github.com/nuneszxd/valorant-creator-studio.git`
-3. `setup.bat` (uma vez) e depois `start.bat`.
+3. `.\setup.bat` (uma vez) e depois `.\start.bat`. No PowerShell o `.\` é obrigatório; no Prompt de Comando basta o nome.
 
 ## O que faz
 

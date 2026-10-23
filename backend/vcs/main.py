@@ -47,7 +47,7 @@ def _mount_frontend(app: FastAPI, dist: Path) -> None:
             return JSONResponse(
                 {
                     "app": "Valorant Creator Studio",
-                    "message": "Interface ainda não compilada. Rode scripts\\setup.bat (ou 'npm run build' em frontend/).",
+                    "message": "Interface ainda não compilada. Rode .\\setup.bat na pasta do projeto (ou 'npm run build' em frontend/).",
                     "api_docs": "/api/docs",
                 }
             )

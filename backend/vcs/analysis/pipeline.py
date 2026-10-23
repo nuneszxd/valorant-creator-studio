@@ -200,7 +200,7 @@ def _execute(ctx: Any, app: Any, recording: dict[str, Any], path: Path, plan: Pl
     if stream_index >= audio_streams:
         raise InvalidInput(
             f"A gravação tem {audio_streams} faixa(s) de áudio, mas 'audio_stream_index' está em {stream_index}. "
-            "Ajuste em Configurações > Análise."
+            "Ajuste em Configurações > Análise e pontuação."
         )
 
     stages = ["audio"] + (["scenes"] if plan.scenes else []) + (
@@ -318,7 +318,7 @@ def _execute(ctx: Any, app: Any, recording: dict[str, Any], path: Path, plan: Pl
     }
     if not windows:
         stats["hint"] = (
-            "Nenhum pico de áudio relevante foi encontrado. Reduza 'min_intensity' em Configurações > Análise "
+            "Nenhum pico de áudio relevante foi encontrado. Reduza a sensibilidade (min_intensity) em Configurações > Análise e pontuação "
             "ou crie cortes manualmente."
         )
     return stats

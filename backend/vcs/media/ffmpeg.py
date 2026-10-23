@@ -17,7 +17,8 @@ from ..errors import InvalidInput, Unavailable
 from ..jobs.procs import run_capture
 from ..utils import loads
 
-_FLAGS = re.compile(r"^[A-Za-z.]{2,8}$")
+_FILTER_LINE = re.compile(r"^\s*[A-Za-z.]{2,3}\s+(\S+)\s+[AVN|]->[AVN|](?:\s|$)")
+_ENCODER_LINE = re.compile(r"^\s*[VAS][A-Za-z.]{5}\s+(\S+)(?:\s|$)")
 
 
 @dataclass
@@ -88,19 +89,18 @@ def parse_probe(data: dict[str, Any], size_bytes: int | None = None) -> MediaInf
 
 
 def parse_ffmpeg_list(output: str) -> set[str]:
-    """Parse `ffmpeg -encoders` / `-filters` output into a set of names."""
+    """Parse `ffmpeg -encoders` / `-filters` output into a set of names.
+
+    The two listings look different, and neither can be assumed to have a separator line:
+      encoder:  " V....D libx264        libx264 H.264 / AVC ..."   (6 flag characters)
+      filter:   " .. ass                V->V       Render ASS subtitles ..."  (2-3 flag characters, then in->out)
+    Legend lines (" V..... = Video", "  T.. = Timeline support") have "=" as the second column and are skipped.
+    """
     names: set[str] = set()
-    in_table = False
     for line in output.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("------"):
-            in_table = True
-            continue
-        if not in_table or not stripped:
-            continue
-        parts = stripped.split(None, 2)
-        if len(parts) >= 2 and _FLAGS.match(parts[0]):
-            names.add(parts[1])
+        match = _FILTER_LINE.match(line) or _ENCODER_LINE.match(line)
+        if match and match.group(1) != "=":
+            names.add(match.group(1))
     return names
 
 

@@ -180,6 +180,50 @@ def test_render_preview_and_final_with_all_layouts(client, tmp_path):
     assert {"export", "preview"} <= kinds
 
 
+def frame_md5(ffmpeg: str, video: str, at: float) -> str:
+    """MD5 of the decoded frame at `at` seconds - changes when anything is drawn on the picture."""
+    import subprocess
+
+    out = subprocess.run(
+        [ffmpeg, "-nostdin", "-v", "error", "-ss", str(at), "-i", str(video), "-frames:v", "1", "-f", "framemd5", "-"],
+        capture_output=True, text=True, check=True, timeout=60,
+    ).stdout
+    rows = [line for line in out.splitlines() if line and not line.startswith("#")]
+    return rows[-1].split(",")[-1].strip()
+
+
+def test_subtitles_are_really_burned_into_the_rendered_video(client, tmp_path):
+    """The earlier suite passed while subtitles were silently skipped: prove the text is drawn on the frame."""
+    tools = FFmpegTools.discover()
+    if "ass" not in tools.filters():
+        pytest.skip("this FFmpeg build has no libass ('ass' filter)")
+    video = make_test_video(tmp_path / "legenda.mp4", seconds=6)
+    rec = import_video(client, video)
+    clip = client.post("/api/clips", json={"recording_id": rec["id"], "start_s": 0, "end_s": 6}).json()
+    url = f"/api/clips/{clip['id']}"
+    cues = [{"start": 0.2, "end": 5.5, "text": "olha esse clutch aqui agora"}]
+    base = {"width": 360, "height": 640, "preset": "ultrafast", "crf": 28, "layout": "solid"}
+    saved = client.patch(url, json={"subtitles": cues, "render_config": {**base, "subtitles": False}})
+    assert saved.status_code == 200, saved.text
+
+    def render_and_hash():
+        job = finish(client, client.post(f"{url}/render", json={"mode": "final"}).json())
+        assert job["state"] == "succeeded", job["error"]
+        path = client.get(url).json()["output_path"]
+        return job, frame_md5(tools.ffmpeg, path, 1.5)
+
+    _, plain_a = render_and_hash()
+    _, plain_b = render_and_hash()
+    assert plain_a == plain_b, "encoding must be deterministic for this comparison to mean anything"
+
+    client.patch(url, json={"render_config": {"subtitles": True}})
+    plan = client.get(f"{url}/render-plan").json()
+    assert plan["subtitles_applied"] is True and "ass=filename=subs.ass" in plan["filter_graph"]
+    job, with_subtitles = render_and_hash()
+    assert "Legendas não aplicadas" not in (job["message"] or "")
+    assert with_subtitles != plain_a, "the subtitle text was not drawn on the video"
+
+
 def test_render_refuses_unavailable_encoder_and_missing_source(client, tmp_path):
     video = make_test_video(tmp_path / "x.mp4", seconds=6)
     rec = import_video(client, video)

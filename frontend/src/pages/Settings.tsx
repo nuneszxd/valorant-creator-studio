@@ -421,7 +421,7 @@ function SystemTab() {
           ))}
         </div>
         <p className="small"><strong>Filtros:</strong> {Object.entries(c.ffmpeg.filters).map(([name, ok]) => `${name}: ${ok ? "ok" : "ausente"}`).join(" · ")}</p>
-        {!c.ffmpeg.filters["ass"] && <Notice tone="warn">Sem o filtro “ass”, as legendas não podem ser gravadas no vídeo. Use uma build “full” do FFmpeg.</Notice>}
+        {!c.ffmpeg.filters["ass"] && <Notice tone="warn">Sem o filtro “ass”, as legendas não podem ser gravadas no vídeo. Use uma build do FFmpeg com libass (as builds “essentials” e “full” da gyan.dev têm).</Notice>}
       </Card>
       <Card title="Ambiente">
         <dl className="kv">

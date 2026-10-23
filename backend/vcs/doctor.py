@@ -60,7 +60,8 @@ def run_checks(config: AppConfig, *, deep: bool = False) -> list[dict[str, str]]
             )
         checks.append(
             _check("Filtro 'ass' (legendas)", OK if "ass" in filters else WARN,
-                   "disponível" if "ass" in filters else "ausente: use uma build 'full' do FFmpeg para legendas")
+                   "disponível" if "ass" in filters
+                   else "ausente: use uma build do FFmpeg com libass (as builds 'essentials' e 'full' da gyan.dev têm) para legendas")
         )
         checks.append(
             _check("Filtros boxblur/loudnorm", OK if {"boxblur", "loudnorm"} <= filters else WARN,
@@ -93,7 +94,7 @@ def run_checks(config: AppConfig, *, deep: bool = False) -> list[dict[str, str]]
     dist_ok = (config.frontend_dist / "index.html").is_file()
     checks.append(
         _check("Interface compilada", OK if dist_ok else WARN,
-               str(config.frontend_dist) if dist_ok else "não compilada (rode scripts\\setup.bat)")
+               str(config.frontend_dist) if dist_ok else "não compilada (rode .\\setup.bat na pasta do projeto)")
     )
 
     try:
