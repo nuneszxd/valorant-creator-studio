@@ -221,7 +221,37 @@ def test_subtitles_are_really_burned_into_the_rendered_video(client, tmp_path):
     assert plan["subtitles_applied"] is True and "ass=filename=subs.ass" in plan["filter_graph"]
     job, with_subtitles = render_and_hash()
     assert "Legendas não aplicadas" not in (job["message"] or "")
-    assert with_subtitles != plain_a, "the subtitle text was not drawn on the video"
+    assert with_subtitles != plain_a, (
+        f"the subtitle text was not drawn on the video; job message={job['message']!r}; result={job['result']!r}"
+    )
+
+
+def test_libass_draws_text_with_the_installed_ffmpeg(tmp_path):
+    """Isolates FFmpeg+libass+fonts from the rest of the pipeline: draw big text on a black frame."""
+    import subprocess
+
+    from vcs.media.subtitles import build_ass
+    from vcs.models import SubtitleStyle
+
+    tools = FFmpegTools.discover()
+    if "ass" not in tools.filters():
+        pytest.skip("this FFmpeg build has no libass ('ass' filter)")
+    cue = {"start": 0.0, "end": 3.0, "text": "TESTE DE LEGENDA", "words": None}
+    style = SubtitleStyle(highlight_words=False, size_pct=8)
+    (tmp_path / "s.ass").write_text(build_ass([cue], style, 360, 640), encoding="utf-8")
+
+    def first_frame_md5(extra: list[str]) -> tuple[str, str]:
+        proc = subprocess.run(
+            [tools.ffmpeg, "-nostdin", "-hide_banner", "-v", "warning", "-f", "lavfi", "-i", "color=c=black:s=360x640:r=10:d=2",
+             *extra, "-frames:v", "1", "-f", "framemd5", "-"],
+            capture_output=True, text=True, cwd=str(tmp_path), timeout=60,
+        )
+        rows = [line for line in proc.stdout.splitlines() if line and not line.startswith("#")]
+        return (rows[-1].split(",")[-1].strip() if rows else ""), proc.stderr
+
+    plain, _ = first_frame_md5([])
+    drawn, stderr = first_frame_md5(["-vf", "ass=filename=s.ass"])
+    assert drawn and drawn != plain, f"libass drew nothing. FFmpeg stderr:\n{stderr[-1500:]}"
 
 
 def test_render_refuses_unavailable_encoder_and_missing_source(client, tmp_path):

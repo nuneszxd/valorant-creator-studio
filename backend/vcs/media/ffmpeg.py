@@ -17,7 +17,8 @@ from ..errors import InvalidInput, Unavailable
 from ..jobs.procs import run_capture
 from ..utils import loads
 
-_FILTER_LINE = re.compile(r"^\s*[A-Za-z.]{2,3}\s+(\S+)\s+[AVN|]->[AVN|](?:\s|$)")
+# The in->out column lists one letter per pad: "A->A", "V->V", but also "VV->V" (overlay), "N->A", "|->V".
+_FILTER_LINE = re.compile(r"^\s*[A-Za-z.]{2,3}\s+(\S+)\s+[AVN|]+->[AVN|]+(?:\s|$)")
 _ENCODER_LINE = re.compile(r"^\s*[VAS][A-Za-z.]{5}\s+(\S+)(?:\s|$)")
 
 

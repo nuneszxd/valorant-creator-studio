@@ -7,6 +7,7 @@ from validated settings - the UI cannot inject arbitrary FFmpeg arguments.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,7 @@ from .subtitles import build_ass, cues_from_segments
 from .transcribe import build_transcriber
 
 PREVIEW_WIDTH = 540
+_FONT_WARNING = re.compile(r"fontselect|fontconfig|Parsed_ass|libass", re.IGNORECASE)
 
 
 def _even(value: float) -> int:
@@ -141,7 +143,8 @@ def build_plan(
         graph += ";" + audio_graph(cfg, audio_stream_index, duration)
 
     args = [
-        ffmpeg, "-nostdin", "-hide_banner", "-v", "error", "-y", "-progress", "pipe:1", "-nostats",
+        # "warning" (not "error") so libass/font problems reach stderr and can be shown to the user.
+        ffmpeg, "-nostdin", "-hide_banner", "-v", "warning", "-y", "-progress", "pipe:1", "-nostats",
         "-ss", f"{start_s:.3f}", "-t", f"{duration:.3f}", "-protocol_whitelist", "file", "-i", str(src),
         "-filter_complex", graph, "-map", "[vout]",
     ]
@@ -253,6 +256,14 @@ def render_clip(ctx: Any, app: Any, clip_id: int, mode: str) -> dict[str, Any]:
                 pass  # the clip was deleted while rendering
         raise
     _forget_temp(app, tmp_path)
+    notes = list(plan.notes)
+    if plan.ass_text:
+        font_lines = [ln.strip() for ln in result.stderr_tail.splitlines() if _FONT_WARNING.search(ln)]
+        if font_lines:
+            notes.append(
+                "O FFmpeg avisou sobre as fontes das legendas (elas podem não aparecer): " + " | ".join(font_lines[:3])
+            )
+            ctx.set_message(" ".join(notes))
     size = final_path.stat().st_size
     try:
         if preview:
@@ -265,7 +276,7 @@ def render_clip(ctx: Any, app: Any, clip_id: int, mode: str) -> dict[str, Any]:
         raise AppError("O corte foi excluído durante a renderização; o arquivo gerado foi descartado.") from exc
     app.repos.artifacts.register("preview" if preview else "export", str(final_path), size,
                                  recording_id=recording["id"], clip_id=clip_id)
-    return {"output_path": str(final_path), "size_bytes": size, "mode": mode, "notes": plan.notes}
+    return {"output_path": str(final_path), "size_bytes": size, "mode": mode, "notes": notes}
 
 
 def _forget_temp(app: Any, tmp_path: Path) -> None:

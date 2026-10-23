@@ -34,6 +34,8 @@ FILTERS_SAMPLE = """Filters:
  .. select            V->N       Select video frames to pass in output.
  ... boxblur          V->V       Blur the input.
  T.C loudnorm         A->A       EBU R128 loudness normalization
+ TSC overlay          VV->V      Overlay a video source on top of the input.
+ .S. amix             N->A       Audio mixing.
 """
 
 REAL_ENCODERS_FFMPEG8 = """Encoders:
@@ -60,7 +62,7 @@ def test_parse_ffmpeg_list():
 
 def test_parse_ffmpeg_list_real_ffmpeg8_output_has_no_separator_for_filters():
     filters = parse_ffmpeg_list(FILTERS_SAMPLE)
-    assert {"allpass", "anull", "ass", "virtualbass", "sinc", "select"} <= filters
+    assert {"allpass", "anull", "ass", "virtualbass", "sinc", "select", "overlay", "amix"} <= filters
     assert "=" not in filters and "Timeline" not in filters  # legend lines are not filters
     encoders = parse_ffmpeg_list(REAL_ENCODERS_FFMPEG8)
     assert encoders == {"libx264", "libx264rgb", "h264_amf"}  # legend lines ("V..... = Video") are skipped
