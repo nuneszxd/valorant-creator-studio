@@ -221,8 +221,41 @@ def test_subtitles_are_really_burned_into_the_rendered_video(client, tmp_path):
     assert plan["subtitles_applied"] is True and "ass=filename=subs.ass" in plan["filter_graph"]
     job, with_subtitles = render_and_hash()
     assert "Legendas não aplicadas" not in (job["message"] or "")
-    assert with_subtitles != plain_a, (
-        f"the subtitle text was not drawn on the video; job message={job['message']!r}; result={job['result']!r}"
+    if with_subtitles == plain_a:
+        pytest.fail(
+            "the subtitle text was not drawn on the video\n"
+            f"job message={job['message']!r}\nresult={job['result']!r}\n"
+            + diagnose_missing_subtitles(tools, plan, tmp_path, plain_a)
+        )
+
+
+def diagnose_missing_subtitles(tools, plan, tmp_path, plain_md5) -> str:
+    """Re-run pieces of the render outside the app to find which layer loses the subtitles."""
+    import subprocess
+
+    script = plan["ass"] or ""
+    (tmp_path / "subs.ass").write_text(script, encoding="utf-8")
+
+    def run(args):
+        proc = subprocess.run(args, capture_output=True, text=True, cwd=str(tmp_path), timeout=120)
+        rows = [line for line in proc.stdout.splitlines() if line and not line.startswith("#")]
+        digest = rows[-1].split(",")[-1].strip() if rows and "," in rows[-1] else ""
+        return digest, proc.stderr[-800:]
+
+    black = [tools.ffmpeg, "-nostdin", "-hide_banner", "-v", "warning", "-f", "lavfi", "-i", "color=c=black:s=360x640:r=10:d=3"]
+    tail = ["-ss", "1.5", "-frames:v", "1", "-f", "framemd5", "-"]
+    blank, _ = run(black + tail)
+    drawn_a, err_a = run(black + ["-vf", "ass=filename=subs.ass"] + tail)
+
+    command = list(plan["command"])
+    command[-1] = str(tmp_path / "direct.mp4")
+    proc = subprocess.run(command, capture_output=True, text=True, cwd=str(tmp_path), timeout=120)
+    direct, _ = run([tools.ffmpeg, "-nostdin", "-v", "error", "-ss", "1.5", "-i", str(tmp_path / "direct.mp4"),
+                     "-frames:v", "1", "-f", "framemd5", "-"])
+    return (
+        f"[A] app's ASS script alone on a black frame at 1.5s: drawn={drawn_a != blank} stderr={err_a!r}\n"
+        f"[B] app's exact command run directly: rc={proc.returncode} drawn={direct != plain_md5} stderr={proc.stderr[-600:]!r}\n"
+        f"ASS script head:\n{chr(10).join(script.splitlines()[:16])}"
     )
 
 

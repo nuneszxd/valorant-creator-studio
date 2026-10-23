@@ -330,6 +330,8 @@ def render_plan(clip_id: int, c: Ctx, mode: Literal["final", "preview"] = "final
         "filter_graph": plan.graph,
         "notes": plan.notes,
         "subtitles_applied": plan.ass_text is not None,
+        # The generated subtitle script (ASS), so the exact text/timing sent to FFmpeg can be inspected.
+        "ass": plan.ass_text,
     }
 
 
